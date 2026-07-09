@@ -1,8 +1,11 @@
-"""Menüleisten-App (rumps): Status, Sprache, Verlauf, Handy-Kopplung, Berechtigungen."""
+"""Menüleisten-App (rumps): Status, Sprache, Verlauf, Handy-Kopplung, Berechtigungen.
+
+UI-Updates passieren ausschließlich über einen rumps.Timer auf dem Haupt-Thread —
+der Controller (andere Threads) setzt nur .state / .history_dirty / .last_error.
+"""
 
 import logging
 import subprocess
-import threading
 
 import rumps
 
@@ -11,32 +14,51 @@ from .server import lan_ip
 
 log = logging.getLogger("localflow.menubar")
 
-ICON_IDLE = "🎙"
-ICON_REC = "🔴"
-ICON_BUSY = "⏳"
-ICON_LOADING = "🎙…"
-
+ICONS = {"loading": "🎙…", "idle": "🎙", "rec": "🔴", "busy": "⏳"}
 LANGS = [("Automatisch", "auto"), ("Deutsch", "de"), ("Englisch", "en")]
 
 
 class MenubarApp(rumps.App):
     def __init__(self, controller):
-        super().__init__(ICON_LOADING, quit_button=None)
-        self.controller = controller  # FlowController aus main.py
+        super().__init__(ICONS["loading"], quit_button=None)
+        self.controller = controller
+        self._shown_state = None
+        self._ready_shown = False
         self._build_menu()
+        self._timer = rumps.Timer(self._tick, 0.3)
+        self._timer.start()
 
-    # ---- Status-Icon (thread-sicher von überall aufrufbar) ----
+    # ---- Haupt-Thread-Tick: Icon, Status-Zeile, Verlauf, Fehler ----
 
-    def set_state(self, state: str) -> None:
-        icons = {"idle": ICON_IDLE, "rec": ICON_REC, "busy": ICON_BUSY,
-                 "loading": ICON_LOADING}
-        self.title = icons.get(state, ICON_IDLE)
+    def _tick(self, _):
+        c = self.controller
+        if c.state != self._shown_state:
+            self._shown_state = c.state
+            self.title = ICONS.get(c.state, ICONS["idle"])
+
+        if not self._ready_shown and c.engine.loaded:
+            self._ready_shown = True
+            from .hotkey import KEY_NAMES
+
+            key = c.cfg.get("hotkey", "alt_r")
+            self.status_item.title = f"Bereit — {KEY_NAMES.get(key, key)} halten & sprechen"
+
+        if c.history_dirty:
+            c.history_dirty = False
+            self._refresh_history()
+
+        if c.last_error:
+            msg, c.last_error = c.last_error, ""
+            try:
+                rumps.notification("LocalFlow", "", msg)
+            except Exception:
+                log.warning("Hinweis: %s", msg)
 
     # ---- Menü ----
 
     def _build_menu(self):
         cfg = self.controller.cfg
-        self.status_item = rumps.MenuItem("Modell lädt…")
+        self.status_item = rumps.MenuItem("Modell lädt… (erster Start: Download)")
         self.status_item.set_callback(None)
 
         lang_menu = rumps.MenuItem("Sprache")
@@ -46,7 +68,6 @@ class MenubarApp(rumps.App):
             lang_menu.add(item)
 
         self.history_menu = rumps.MenuItem("Verlauf")
-        self._refresh_history()
 
         port = cfg.get("server_port", 8790)
         phone = rumps.MenuItem("📱 Handy koppeln")
@@ -68,6 +89,7 @@ class MenubarApp(rumps.App):
             rumps.MenuItem("Berechtigungen prüfen", callback=self._check_perms),
             rumps.MenuItem("Beenden", callback=self._quit),
         ]
+        self._refresh_history()
 
     def _make_lang_cb(self, code):
         def cb(sender):
@@ -76,19 +98,13 @@ class MenubarApp(rumps.App):
                 item.state = 1 if item.title == sender.title else 0
         return cb
 
-    def set_ready(self, model_name: str):
-        hotkey = self.controller.cfg.get("hotkey", "alt_r")
-        from .hotkey import KEY_NAMES
-        key_label = KEY_NAMES.get(hotkey, hotkey)
-        self.status_item.title = f"Bereit — {key_label} halten & sprechen"
-        self.set_state("idle")
-        log.info("Bereit. Modell: %s", model_name)
-
     def _refresh_history(self):
-        # rumps erlaubt das Neubefüllen von Submenüs nur begrenzt; einfach neu setzen
+        # rumps legt das Untermenü (NSMenu) erst an, wenn es Einträge hat —
+        # clear() auf einem noch leeren Submenü wirft AttributeError. Das ist
+        # nur der Erst-Aufbau (nichts zu leeren), daher gezielt überspringen.
         try:
             self.history_menu.clear()
-        except Exception:
+        except AttributeError:
             pass
         entries = config.load_history()[:8]
         if not entries:
@@ -98,16 +114,14 @@ class MenubarApp(rumps.App):
             return
         for e in entries:
             label = e["text"][:60] + ("…" if len(e["text"]) > 60 else "")
-            self.history_menu.add(rumps.MenuItem(label, callback=self._make_copy_cb(e["text"])))
+            self.history_menu.add(
+                rumps.MenuItem(label, callback=self._make_copy_cb(e["text"]))
+            )
 
     def _make_copy_cb(self, text):
         def cb(_):
             subprocess.run(["pbcopy"], input=text.encode("utf-8"))
         return cb
-
-    def notify_result(self, text: str):
-        """Nach jedem Diktat: Verlauf im Menü aktualisieren."""
-        self._refresh_history()
 
     # ---- Callbacks ----
 
@@ -143,15 +157,17 @@ class MenubarApp(rumps.App):
 
         request_permissions()
         s = permissions_status()
-        ok = "✅"
-        no = "❌ fehlt"
-        msg = (
-            f"Eingabemonitoring (Hotkey): {ok if s['input_monitoring'] else no}\n"
-            f"Bedienungshilfen (Einfügen): {ok if s['accessibility'] else no}\n\n"
-            "Falls etwas fehlt: Systemeinstellungen → Datenschutz & Sicherheit,\n"
-            "dort 'Terminal' aktivieren und LocalFlow neu starten."
+        ok, no = "✅", "❌ fehlt"
+        rumps.alert(
+            title="LocalFlow — Berechtigungen",
+            message=(
+                f"Eingabemonitoring (Hotkey): {ok if s['input_monitoring'] else no}\n"
+                f"Bedienungshilfen (Einfügen): {ok if s['accessibility'] else no}\n\n"
+                "Falls etwas fehlt: Systemeinstellungen → Datenschutz & Sicherheit,\n"
+                "dort 'Terminal' bei beiden Punkten aktivieren\n"
+                "und LocalFlow neu starten."
+            ),
         )
-        rumps.alert(title="LocalFlow — Berechtigungen", message=msg)
 
     def _quit(self, _):
         self.controller.shutdown()
