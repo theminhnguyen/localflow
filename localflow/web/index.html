@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1117">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>LocalFlow</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1e2a; --text: #eef1f7; --muted: #8b93a7;
+    --accent: #5b8cff; --rec: #ff5b6e; --ok: #3ecf8e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column;
+    padding: max(env(safe-area-inset-top), 16px) 16px max(env(safe-area-inset-bottom), 16px);
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 14px; }
+  header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  header h1 span { color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--rec); }
+
+  #result {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+    padding-bottom: 12px;
+  }
+  .card {
+    background: var(--card); border-radius: 14px; padding: 14px;
+    font-size: 16px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  }
+  .card .meta { display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .card button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 7px 14px; font-size: 13px; font-weight: 600;
+  }
+  .card button.copied { background: var(--ok); }
+  .hint { color: var(--muted); text-align: center; font-size: 14px; margin: auto; line-height: 1.6; padding: 0 20px; }
+  .error { color: var(--rec); }
+
+  #controls { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 10px; }
+  #langRow { display: flex; gap: 8px; }
+  #langRow button {
+    background: var(--card); color: var(--muted); border: 1px solid #2a3040;
+    border-radius: 999px; padding: 6px 14px; font-size: 13px;
+  }
+  #langRow button.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  #mic {
+    width: 108px; height: 108px; border-radius: 50%; border: 0;
+    background: radial-gradient(circle at 35% 30%, #6f9bff, var(--accent) 70%);
+    box-shadow: 0 6px 30px rgba(91,140,255,.45);
+    font-size: 44px; color: #fff; position: relative;
+    transition: transform .1s ease;
+  }
+  #mic:active { transform: scale(.94); }
+  #mic.rec {
+    background: radial-gradient(circle at 35% 30%, #ff8b98, var(--rec) 70%);
+    box-shadow: 0 6px 30px rgba(255,91,110,.5);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  #mic.busy { background: #3a4157; box-shadow: none; animation: none; }
+  @keyframes pulse { 50% { box-shadow: 0 6px 44px rgba(255,91,110,.85); } }
+  #micLabel { font-size: 13px; color: var(--muted); min-height: 18px; }
+  #timer { font-variant-numeric: tabular-nums; color: var(--rec); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local<span>Flow</span></h1>
+  <div class="status"><div class="dot" id="dot"></div><span id="statusText">verbinde…</span></div>
+</header>
+
+<div id="result">
+  <p class="hint" id="hint">Tippe auf den Mikrofon-Button, sprich,<br>tippe erneut zum Stoppen.<br><br>Der Text wird lokal auf deinem Mac<br>transkribiert — nichts geht ins Internet.</p>
+</div>
+
+<div id="controls">
+  <div id="langRow">
+    <button data-lang="auto">Auto</button>
+    <button data-lang="de">Deutsch</button>
+    <button data-lang="en">English</button>
+  </div>
+  <button id="mic" aria-label="Aufnahme">🎙️</button>
+  <div id="micLabel"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { recorder: null, chunks: [], recording: false, busy: false, t0: 0, timerId: 0 };
+let lang = localStorage.getItem("lf_lang") || "auto";
+
+// ---- Sprache wählen ----
+document.querySelectorAll("#langRow button").forEach(b => {
+  if (b.dataset.lang === lang) b.classList.add("sel");
+  b.onclick = () => {
+    lang = b.dataset.lang; localStorage.setItem("lf_lang", lang);
+    document.querySelectorAll("#langRow button").forEach(x => x.classList.toggle("sel", x === b));
+  };
+});
+
+// ---- Server-Status ----
+async function ping() {
+  try {
+    const r = await fetch("/api/ping"); const j = await r.json();
+    $("dot").className = "dot on";
+    $("statusText").textContent = j.loaded ? "bereit" : "Modell lädt…";
+  } catch { $("dot").className = "dot off"; $("statusText").textContent = "Mac nicht erreichbar"; }
+}
+ping(); setInterval(ping, 5000);
+
+// ---- Verlauf ----
+function history() { try { return JSON.parse(localStorage.getItem("lf_history") || "[]"); } catch { return []; } }
+function saveHistory(h) { localStorage.setItem("lf_history", JSON.stringify(h.slice(0, 20))); }
+function addCard(text, meta, isError) {
+  $("hint")?.remove();
+  const card = document.createElement("div");
+  card.className = "card" + (isError ? " error" : "");
+  const p = document.createElement("div"); p.textContent = text; card.appendChild(p);
+  if (!isError) {
+    const row = document.createElement("div"); row.className = "meta";
+    const m = document.createElement("span"); m.textContent = meta || "";
+    const btn = document.createElement("button"); btn.textContent = "Kopieren";
+    btn.onclick = async () => {
+      try { await navigator.clipboard.writeText(text); }
+      catch { // Fallback für ältere Safari-Versionen
+        const ta = document.createElement("textarea"); ta.value = text;
+        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+      }
+      btn.textContent = "Kopiert ✓"; btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = "Kopieren"; btn.classList.remove("copied"); }, 1500);
+    };
+    row.append(m, btn); card.appendChild(row);
+  }
+  $("result").prepend(card);
+}
+history().forEach(h => addCard(h.text, h.meta));
+
+// ---- Aufnahme ----
+function pickMime() {
+  const types = ["audio/mp4", "audio/mp4;codecs=mp4a.40.2", "audio/webm;codecs=opus", "audio/webm"];
+  return types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+}
+
+async function startRec() {
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { addCard("Mikrofon-Zugriff verweigert. Bitte in Safari erlauben (aA-Menü → Website-Einstellungen).", "", true); return; }
+  const mime = pickMime();
+  state.recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  state.chunks = [];
+  state.recorder.ondataavailable = e => { if (e.data.size) state.chunks.push(e.data); };
+  state.recorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); upload(); };
+  state.recorder.start();
+  state.recording = true; state.t0 = Date.now();
+  $("mic").classList.add("rec"); $("mic").textContent = "■";
+  state.timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - state.t0) / 1000);
+    $("micLabel").innerHTML = '<span id="timer">● ' + String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0") + "</span>";
+  }, 250);
+}
+
+function stopRec() {
+  if (!state.recorder) return;
+  state.recording = false;
+  clearInterval(state.timerId);
+  $("mic").classList.remove("rec"); $("mic").classList.add("busy"); $("mic").textContent = "…";
+  $("micLabel").textContent = "Transkribiere auf dem Mac…";
+  state.busy = true;
+  state.recorder.stop();
+}
+
+async function upload() {
+  const mime = state.recorder?.mimeType || "audio/mp4";
+  const ext = mime.includes("webm") ? "webm" : "m4a";
+  const blob = new Blob(state.chunks, { type: mime });
+  const fd = new FormData();
+  fd.append("audio", blob, "aufnahme." + ext);
+  if (lang !== "auto") fd.append("language", lang);
+  try {
+    const r = await fetch("/api/transcribe", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Server-Fehler");
+    const meta = j.seconds + "s · " + (j.language || "?") + " · " + j.ms + "ms";
+    addCard(j.text, meta);
+    const h = history(); h.unshift({ text: j.text, meta }); saveHistory(h);
+  } catch (e) {
+    addCard("Fehler: " + e.message, "", true);
+  } finally {
+    state.busy = false;
+    $("mic").classList.remove("busy"); $("mic").textContent = "🎙️";
+    $("micLabel").textContent = "";
+  }
+}
+
+$("mic").addEventListener("click", () => {
+  if (state.busy) return;
+  state.recording ? stopRec() : startRec();
+});
+
+// ---- PWA ----
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
