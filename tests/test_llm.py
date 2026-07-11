@@ -48,3 +48,26 @@ def test_validate_rejects_garbage():
 def test_short_text_skipped():
     text, used = llm.maybe_polish("Ok", {"llm_enabled": True})
     assert used is False
+
+
+def test_available_requires_model(monkeypatch):
+    monkeypatch.setattr(llm, "server_up", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "has_model", lambda m, **k: m == "gemma3:4b")
+    assert llm.available() is True                 # ohne Modellprüfung
+    assert llm.available("gemma3:4b") is True       # Modell vorhanden
+    assert llm.available("fehlt:1b") is False       # Modell fehlt
+
+
+def test_available_false_when_server_down(monkeypatch):
+    monkeypatch.setattr(llm, "server_up", lambda *a, **k: False)
+    assert llm.available() is False
+    assert llm.available("gemma3:4b") is False
+
+
+def test_maybe_polish_skips_when_model_missing(monkeypatch):
+    monkeypatch.setattr(llm, "server_up", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "has_model", lambda m, **k: False)
+    called = []
+    monkeypatch.setattr(llm, "polish", lambda *a, **k: called.append(1) or "X")
+    text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True, "llm_model": "gemma3:4b"})
+    assert used is False and text == "Hallo Welt." and called == []

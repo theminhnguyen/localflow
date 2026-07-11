@@ -36,13 +36,34 @@ _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
 _FENCE_RE = re.compile(r"^```[a-z]*\n(.*?)\n```$", re.S)
 
 
-def available(timeout: float = 0.5) -> bool:
+def server_up(timeout: float = 0.5) -> bool:
     """True, wenn der Ollama-Server lokal antwortet."""
     try:
         with urllib.request.urlopen(f"{BASE_URL}/api/version", timeout=timeout):
             return True
     except (urllib.error.URLError, OSError, ValueError):
         return False
+
+
+def has_model(model: str, timeout: float = 1.0) -> bool:
+    """True, wenn das genannte Modell in Ollama installiert ist."""
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}/api/tags", timeout=timeout) as r:
+            names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return False
+    base = model.split(":")[0]
+    # exakter Treffer oder gleiche Modellfamilie (z.B. "gemma3:4b" ~ "gemma3:latest")
+    return any(n == model or n.split(":")[0] == base for n in names)
+
+
+def available(model: str | None = None, timeout: float = 0.5) -> bool:
+    """True, wenn Ollama läuft — und, falls model gegeben, das Modell vorhanden ist."""
+    if not server_up(timeout):
+        return False
+    if model is None:
+        return True
+    return has_model(model, timeout=max(timeout, 1.0))
 
 
 def polish(text: str, model: str, timeout: float = 20.0):
@@ -101,10 +122,10 @@ def maybe_polish(text: str, cfg: dict):
         return text, False
     if len(text.strip()) < 3:
         return text, False
-    if not available():
+    model = cfg.get("llm_model", "gemma3:4b")
+    if not available(model):  # Ollama läuft UND Modell ist installiert?
         return text, False
-    out = polish(text, cfg.get("llm_model", "gemma3:4b"),
-                 float(cfg.get("llm_timeout", 20)))
+    out = polish(text, model, float(cfg.get("llm_timeout", 20)))
     if out is None:
         return text, False
     return out, True

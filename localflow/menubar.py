@@ -147,13 +147,20 @@ class MenubarApp(rumps.App):
             if key == "llm_enabled" and new:
                 from . import llm
 
-                if not llm.available():
+                model = self.controller.cfg.get("llm_model", "gemma3:4b")
+                if not llm.server_up():
                     rumps.alert(
                         title="LocalFlow — KI-Feinschliff",
                         message=("Ollama antwortet nicht. Der Feinschliff bleibt an, "
                                  "wird aber erst genutzt, wenn Ollama läuft.\n\n"
-                                 "Start: Terminal öffnen und 'ollama serve' ausführen — "
-                                 "oder LocalFlow-Neustart, falls Ollama als Dienst installiert ist."))
+                                 "Installieren/Starten: 'brew install ollama' und "
+                                 "'brew services start ollama'."))
+                elif not llm.has_model(model):
+                    rumps.alert(
+                        title="LocalFlow — KI-Feinschliff",
+                        message=(f"Ollama läuft, aber das Modell '{model}' fehlt noch. "
+                                 "Der Feinschliff bleibt an und greift automatisch, "
+                                 f"sobald es da ist.\n\nHolen: 'ollama pull {model}'"))
         return cb
 
     def _make_choice_cb(self, menu_title, code, apply_fn, parent=None):
