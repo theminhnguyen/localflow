@@ -32,10 +32,15 @@ DEFAULT_CONFIG = {
     # Ton-Feedback bei Start/Stopp der Aufnahme
     "sounds": True,
     # --- Feature-Schalter (alle im Menü umschaltbar) ---
-    # KI-Feinschliff über lokales LLM (Ollama); fällt ohne Ollama lautlos zurück
+    # KI-Feinschliff über lokales LLM; lautloser Fallback, wenn kein LLM läuft.
     "llm_enabled": True,
-    "llm_model": "gemma3:4b",
-    "llm_timeout": 20,
+    # Backend: "auto" (LM Studio ODER Ollama, je nachdem was läuft),
+    # "lmstudio" oder "ollama" fest.
+    "llm_backend": "auto",
+    # Bevorzugtes Modell (Teilstring genügt, z.B. "gemma"); leer = automatisch
+    # das erste geladene Chat-Modell.
+    "llm_model": "gemma",
+    "llm_timeout": 30,
     # Freihand-Modus: Hotkey doppelt antippen = Aufnahme rastet ein
     "handsfree": True,
     # Handy darf Text direkt an der Mac-Cursor-Position einfügen

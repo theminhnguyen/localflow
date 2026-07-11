@@ -34,7 +34,8 @@ Alle Funktionen sind unter **⚙️ Einstellungen** im Menüleisten-Menü einzel
 - Mac mit Apple Silicon (M1/M2/M3/M4) — getestet auf **M1 Pro**
 - macOS mit Homebrew-Python 3.12 (`/opt/homebrew/bin/python3.12`)
 - Für die iPhone-App: Handy im **gleichen WLAN** wie der Mac (oder Tailscale auf beiden)
-- Optional für den KI-Feinschliff: [Ollama](https://ollama.com) mit Modell `gemma3:4b`
+- Optional für den KI-Feinschliff: ein lokales LLM über **LM Studio** *oder* **Ollama**
+  (z. B. ein Gemma-Modell) — LocalFlow erkennt automatisch, was läuft
 
 ## Installation & Start
 
@@ -51,16 +52,25 @@ Modell (~1,6 GB).
 
 ### KI-Feinschliff einrichten (optional, empfohlen)
 
+Ein lokales Sprachmodell verbessert jedes Diktat: Selbstkorrekturen
+(„um 2 … nein, 3 Uhr") werden aufgelöst, gesprochene Aufzählungen als Liste
+formatiert, Grammatik geglättet. LocalFlow erkennt **automatisch** eines von zwei
+Backends — ohne LLM läuft alles normal weiter (nur Regel-Cleanup).
+
+**Variante A — LM Studio** (grafisch, einfach):
+1. [LM Studio](https://lmstudio.ai) öffnen, ein Chat-Modell laden (z. B. Gemma).
+2. Tab *Developer* → *Local Server* → **Start** (läuft auf Port 1234).
+
+**Variante B — Ollama** (Kommandozeile):
 ```bash
 brew install ollama
-brew services start ollama     # startet Ollama automatisch im Hintergrund
-ollama pull gemma3:4b          # einmalig ~3 GB
+brew services start ollama
+ollama pull gemma3:4b
 ```
 
-Danach verbessert ein lokales Sprachmodell jedes Diktat: Selbstkorrekturen
-(„um 2 … nein, 3 Uhr") werden aufgelöst, gesprochene Aufzählungen als Liste
-formatiert, Grammatik geglättet. Ohne Ollama läuft alles normal weiter —
-dann nur mit dem Regel-Cleanup.
+Das Backend lässt sich in `~/.localflow/config.json` festlegen
+(`"llm_backend"`: `"auto"` | `"lmstudio"` | `"ollama"`), `"llm_model"` ist ein
+Teilstring-Wunsch (z. B. `"gemma"`, leer = erstes geladenes Modell).
 
 ### macOS-Berechtigungen (einmalig)
 

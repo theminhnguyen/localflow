@@ -1,9 +1,12 @@
-"""KI-Feinschliff über ein lokales LLM (Ollama, z.B. gemma3:4b).
+"""KI-Feinschliff über ein lokales LLM. Zwei Backends, automatisch erkannt:
 
-Optionale Stufe NACH dem Regel-Cleanup: entfernt Versprecher/Selbstkorrekturen,
-formt gesprochene Aufzählungen zu Listen, glättet Grammatik. Fällt bei jedem
-Problem (Ollama aus, Timeout, komische Antwort) lautlos auf den Regel-Text zurück.
-Komplett lokal — nichts verlässt den Mac.
+- **LM Studio** (OpenAI-kompatible API, Port 1234) — Modelle werden in der
+  LM-Studio-App geladen.
+- **Ollama** (native API, Port 11434) — `ollama serve` + `ollama pull <modell>`.
+
+Auto-Modus nimmt, was läuft und ein Chat-Modell bereitstellt. Bei jedem Problem
+(kein Backend, Timeout, komische Antwort) lautloser Fallback auf den Regel-Text.
+Alles lokal — nichts verlässt den Mac.
 """
 
 import json
@@ -14,7 +17,8 @@ import urllib.request
 
 log = logging.getLogger("localflow.llm")
 
-BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = "http://127.0.0.1:11434"
+LMSTUDIO_URL = "http://127.0.0.1:1234/v1"
 
 SYSTEM_PROMPT = (
     "Du bist ein unsichtbarer Diktier-Editor. Du erhältst diktierten Rohtext "
@@ -36,60 +40,127 @@ _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
 _FENCE_RE = re.compile(r"^```[a-z]*\n(.*?)\n```$", re.S)
 
 
-def server_up(timeout: float = 0.5) -> bool:
-    """True, wenn der Ollama-Server lokal antwortet."""
-    try:
-        with urllib.request.urlopen(f"{BASE_URL}/api/version", timeout=timeout):
-            return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+# ---------- HTTP-Helfer ----------
+
+def _get_json(url: str, timeout: float):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
 
 
-def has_model(model: str, timeout: float = 1.0) -> bool:
-    """True, wenn das genannte Modell in Ollama installiert ist."""
-    try:
-        with urllib.request.urlopen(f"{BASE_URL}/api/tags", timeout=timeout) as r:
-            names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        return False
-    base = model.split(":")[0]
-    # exakter Treffer oder gleiche Modellfamilie (z.B. "gemma3:4b" ~ "gemma3:latest")
-    return any(n == model or n.split(":")[0] == base for n in names)
-
-
-def available(model: str | None = None, timeout: float = 0.5) -> bool:
-    """True, wenn Ollama läuft — und, falls model gegeben, das Modell vorhanden ist."""
-    if not server_up(timeout):
-        return False
-    if model is None:
-        return True
-    return has_model(model, timeout=max(timeout, 1.0))
-
-
-def polish(text: str, model: str, timeout: float = 20.0):
-    """Schickt text durch das LLM. Liefert den Text oder None bei Problemen."""
-    payload = {
-        "model": model,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        "options": {"temperature": 0.2, "num_predict": 1000},
-    }
+def _post_json(url: str, payload: dict, timeout: float):
     req = urllib.request.Request(
-        f"{BASE_URL}/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
+        url, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as e:
-        log.warning("LLM nicht erreichbar/fehlgeschlagen: %s", e)
-        return None
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
 
-    out = ((data.get("message") or {}).get("content") or "").strip()
+
+# ---------- Modell-Listen je Backend ----------
+
+def _lmstudio_models(timeout: float = 0.6) -> list:
+    try:
+        d = _get_json(f"{LMSTUDIO_URL}/models", timeout)
+        return [m.get("id", "") for m in d.get("data", []) if m.get("id")]
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return []
+
+
+def _ollama_models(timeout: float = 0.6) -> list:
+    try:
+        d = _get_json(f"{OLLAMA_URL}/api/tags", timeout)
+        return [m.get("name", "") for m in d.get("models", []) if m.get("name")]
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return []
+
+
+def _pick(models: list, want: str | None) -> str | None:
+    """Wählt ein passendes Chat-Modell (Embeddings ausgeschlossen)."""
+    chat = [m for m in models if "embed" not in m.lower()]
+    if not chat:
+        return None
+    if want:
+        base = want.split(":")[0].lower()
+        for m in chat:
+            if m.lower() == want.lower() or (base and base in m.lower()):
+                return m
+    for m in chat:              # Gemma ist ein guter DE-Allrounder
+        if "gemma" in m.lower():
+            return m
+    return chat[0]
+
+
+def resolve(cfg: dict, timeout: float = 0.6):
+    """Ermittelt das aktive Backend. -> (backend, base_url, model) oder None."""
+    pref = cfg.get("llm_backend", "auto")
+    want = cfg.get("llm_model") or None
+
+    if pref in ("auto", "lmstudio"):
+        model = _pick(_lmstudio_models(timeout), want)
+        if model:
+            return ("lmstudio", LMSTUDIO_URL, model)
+        if pref == "lmstudio":
+            return None
+    if pref in ("auto", "ollama"):
+        model = _pick(_ollama_models(timeout), want)
+        if model:
+            return ("ollama", OLLAMA_URL, model)
+    return None
+
+
+def status(cfg: dict) -> dict:
+    """Diagnose-Info fürs Menü/API: welches Backend, welches Modell, bereit?"""
+    r = resolve(cfg)
+    if r is None:
+        lm = bool(_lmstudio_models())  # nur zur Unterscheidung der Meldung
+        return {"ready": False, "backend": None, "model": None,
+                "hint": ("LM Studio: Modell laden; oder Ollama: 'ollama serve' + pull"
+                         if not lm else "kein Chat-Modell geladen")}
+    backend, _, model = r
+    return {"ready": True, "backend": backend, "model": model, "hint": ""}
+
+
+def available(cfg=None, **_) -> bool:
+    """True, wenn ein lokales LLM samt Modell bereitsteht.
+
+    cfg darf ein Config-Dict ODER (rückwärtskompatibel) ein Modellname/None sein.
+    """
+    if cfg is None:
+        cfg = {"llm_backend": "auto"}
+    elif isinstance(cfg, str):
+        cfg = {"llm_backend": "auto", "llm_model": cfg}
+    return resolve(cfg) is not None
+
+
+# ---------- Feinschliff ----------
+
+def polish(text: str, cfg: dict, timeout: float = 30.0):
+    """Schickt text durch das erkannte LLM. Liefert den Text oder None bei Problemen."""
+    r = resolve(cfg)
+    if r is None:
+        return None
+    backend, base, model = r
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": text},
+    ]
+    try:
+        if backend == "lmstudio":
+            data = _post_json(f"{base}/chat/completions", {
+                "model": model, "messages": messages,
+                "temperature": 0.2, "max_tokens": 1000, "stream": False,
+            }, timeout)
+            out = (data["choices"][0]["message"]["content"] or "").strip()
+        else:  # ollama
+            data = _post_json(f"{base}/api/chat", {
+                "model": model, "messages": messages, "stream": False,
+                "options": {"temperature": 0.2, "num_predict": 1000},
+            }, timeout)
+            out = ((data.get("message") or {}).get("content") or "").strip()
+    except (urllib.error.URLError, OSError, ValueError, KeyError,
+            IndexError, json.JSONDecodeError) as e:
+        log.warning("LLM (%s) fehlgeschlagen: %s", backend, e)
+        return None
     return _validate(text, out)
 
 
@@ -122,10 +193,7 @@ def maybe_polish(text: str, cfg: dict):
         return text, False
     if len(text.strip()) < 3:
         return text, False
-    model = cfg.get("llm_model", "gemma3:4b")
-    if not available(model):  # Ollama läuft UND Modell ist installiert?
-        return text, False
-    out = polish(text, model, float(cfg.get("llm_timeout", 20)))
+    out = polish(text, cfg, float(cfg.get("llm_timeout", 30)))
     if out is None:
         return text, False
     return out, True

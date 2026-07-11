@@ -322,8 +322,7 @@ class FlowController:
             f"Modell: {self.engine.repo} ({'geladen' if self.engine.loaded else 'lädt…'})",
             f"Diktate: {s['count']}  ·  Audio: {s['audio_s']:.0f}s  ·  Ø Engine: {avg}ms",
             f"KI-Feinschliff: {'an' if self.cfg.get('llm_enabled') else 'aus'}"
-            f" ({self.cfg.get('llm_model')}, {self._llm_status()})"
-            f"  ·  genutzt: {s['llm_used']}×",
+            f" ({self._llm_status()})  ·  genutzt: {s['llm_used']}×",
             f"Eingabemonitoring: {ok(perms['input_monitoring'])}   "
             f"Bedienungshilfen: {ok(perms['accessibility'])}",
             f"Server: https://{lan_ip()}:{self.cfg.get('server_port', 8790)}",
@@ -336,12 +335,10 @@ class FlowController:
     def _llm_status(self) -> str:
         from . import llm
 
-        model = self.cfg.get("llm_model", "gemma3:4b")
-        if not llm.server_up():
-            return "Ollama nicht gestartet"
-        if not llm.has_model(model):
-            return f"Modell '{model}' fehlt (ollama pull {model})"
-        return "bereit"
+        st = llm.status(self.cfg)
+        if st["ready"]:
+            return f"{st['backend']}: {st['model']} bereit"
+        return f"kein LLM aktiv ({st['hint']})"
 
     def _remember_error(self, msg: str) -> None:
         self.errors.append(f"{time.strftime('%H:%M')} {msg}")

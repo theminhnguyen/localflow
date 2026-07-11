@@ -1,4 +1,4 @@
-"""KI-Feinschliff: Fallback-Verhalten und Antwort-Validierung (ohne echtes Ollama)."""
+"""KI-Feinschliff: Backend-Erkennung, Fallback, Validierung (ohne echtes LLM)."""
 
 import sys
 from pathlib import Path
@@ -13,21 +13,19 @@ def test_disabled_returns_unchanged():
     assert text == "Hallo Welt." and used is False
 
 
-def test_unavailable_falls_back(monkeypatch):
-    monkeypatch.setattr(llm, "available", lambda *a, **k: False)
+def test_no_backend_falls_back(monkeypatch):
+    monkeypatch.setattr(llm, "resolve", lambda *a, **k: None)
     text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
     assert text == "Hallo Welt." and used is False
 
 
 def test_polish_error_falls_back(monkeypatch):
-    monkeypatch.setattr(llm, "available", lambda *a, **k: True)
     monkeypatch.setattr(llm, "polish", lambda *a, **k: None)
     text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
     assert text == "Hallo Welt." and used is False
 
 
 def test_polish_success(monkeypatch):
-    monkeypatch.setattr(llm, "available", lambda *a, **k: True)
     monkeypatch.setattr(llm, "polish", lambda *a, **k: "Hallo, Welt!")
     text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
     assert text == "Hallo, Welt!" and used is True
@@ -50,24 +48,52 @@ def test_short_text_skipped():
     assert used is False
 
 
-def test_available_requires_model(monkeypatch):
-    monkeypatch.setattr(llm, "server_up", lambda *a, **k: True)
-    monkeypatch.setattr(llm, "has_model", lambda m, **k: m == "gemma3:4b")
-    assert llm.available() is True                 # ohne Modellprüfung
-    assert llm.available("gemma3:4b") is True       # Modell vorhanden
-    assert llm.available("fehlt:1b") is False       # Modell fehlt
+# ---- Backend-Erkennung ----
+
+def test_pick_prefers_wanted_then_gemma():
+    models = ["deepseek-r1", "gemma-4-e2b-it", "text-embed-nomic"]
+    assert llm._pick(models, "gemma") == "gemma-4-e2b-it"      # Wunsch-Teilstring
+    assert llm._pick(models, None) == "gemma-4-e2b-it"          # Gemma-Vorzug
+    assert llm._pick(["deepseek-r1", "llama3"], None) == "deepseek-r1"  # sonst erstes
+    assert llm._pick(["text-embedding-only"], None) is None     # nur Embeddings
 
 
-def test_available_false_when_server_down(monkeypatch):
-    monkeypatch.setattr(llm, "server_up", lambda *a, **k: False)
-    assert llm.available() is False
-    assert llm.available("gemma3:4b") is False
+def test_resolve_prefers_lmstudio(monkeypatch):
+    monkeypatch.setattr(llm, "_lmstudio_models", lambda *a, **k: ["gemma-4-e2b-it"])
+    monkeypatch.setattr(llm, "_ollama_models", lambda *a, **k: ["gemma3:4b"])
+    backend, url, model = llm.resolve({"llm_backend": "auto", "llm_model": "gemma"})
+    assert backend == "lmstudio" and model == "gemma-4-e2b-it"
 
 
-def test_maybe_polish_skips_when_model_missing(monkeypatch):
-    monkeypatch.setattr(llm, "server_up", lambda *a, **k: True)
-    monkeypatch.setattr(llm, "has_model", lambda m, **k: False)
+def test_resolve_falls_back_to_ollama(monkeypatch):
+    monkeypatch.setattr(llm, "_lmstudio_models", lambda *a, **k: [])
+    monkeypatch.setattr(llm, "_ollama_models", lambda *a, **k: ["gemma3:4b"])
+    r = llm.resolve({"llm_backend": "auto"})
+    assert r is not None and r[0] == "ollama"
+
+
+def test_resolve_forced_backend(monkeypatch):
+    monkeypatch.setattr(llm, "_lmstudio_models", lambda *a, **k: [])
+    monkeypatch.setattr(llm, "_ollama_models", lambda *a, **k: ["gemma3:4b"])
+    assert llm.resolve({"llm_backend": "lmstudio"}) is None  # nur LM Studio erlaubt
+    assert llm.resolve({"llm_backend": "ollama"}) is not None
+
+
+def test_resolve_none_when_nothing(monkeypatch):
+    monkeypatch.setattr(llm, "_lmstudio_models", lambda *a, **k: [])
+    monkeypatch.setattr(llm, "_ollama_models", lambda *a, **k: [])
+    assert llm.resolve({"llm_backend": "auto"}) is None
+    assert llm.available({"llm_backend": "auto"}) is False
+
+
+def test_status_ready(monkeypatch):
+    monkeypatch.setattr(llm, "resolve", lambda *a, **k: ("lmstudio", llm.LMSTUDIO_URL, "gemma-4-e2b-it"))
+    st = llm.status({"llm_backend": "auto"})
+    assert st["ready"] and st["backend"] == "lmstudio" and st["model"] == "gemma-4-e2b-it"
+
+
+def test_maybe_polish_skips_without_backend(monkeypatch):
+    monkeypatch.setattr(llm, "resolve", lambda *a, **k: None)
     called = []
-    monkeypatch.setattr(llm, "polish", lambda *a, **k: called.append(1) or "X")
-    text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True, "llm_model": "gemma3:4b"})
-    assert used is False and text == "Hallo Welt." and called == []
+    text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
+    assert used is False and text == "Hallo Welt."

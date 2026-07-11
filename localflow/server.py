@@ -157,10 +157,7 @@ def create_app(engine, get_language, controller=None) -> Flask:
         body = {
             "model": engine.repo, "loaded": engine.loaded,
             "uptime_s": int(time.time() - _START_TIME),
-            "llm": {"enabled": bool(c.get("llm_enabled")),
-                    "model": c.get("llm_model"),
-                    "server_up": llm.server_up(),
-                    "available": llm.available(c.get("llm_model"))},
+            "llm": {"enabled": bool(c.get("llm_enabled")), **llm.status(c)},
             "lan_ip": lan_ip(), "tailscale_ip": tailscale_ip(),
             "port": c.get("server_port", 8790),
         }
