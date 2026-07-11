@@ -9,6 +9,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DICT_FILE = CONFIG_DIR / "dictionary.json"
 SNIPPETS_FILE = CONFIG_DIR / "snippets.json"
 HISTORY_FILE = CONFIG_DIR / "history.json"
+LOG_DIR = CONFIG_DIR / "logs"
 
 DEFAULT_CONFIG = {
     # mlx-community-Repo oder Kurzname ("turbo", "small", "base")
@@ -26,8 +27,21 @@ DEFAULT_CONFIG = {
     # Verhindert Whisper-Halluzinationen ("Vielen Dank.") bei leeren Aufnahmen.
     # 0.006 lässt geflüsterte Sprache noch durch, blockt aber digitale Stille.
     "silence_rms": 0.006,
+    # Sicherheits-Deckel: Aufnahme wird nach so vielen Sekunden automatisch beendet
+    "max_record_seconds": 120,
     # Ton-Feedback bei Start/Stopp der Aufnahme
     "sounds": True,
+    # --- Feature-Schalter (alle im Menü umschaltbar) ---
+    # KI-Feinschliff über lokales LLM (Ollama); fällt ohne Ollama lautlos zurück
+    "llm_enabled": True,
+    "llm_model": "gemma3:4b",
+    "llm_timeout": 20,
+    # Freihand-Modus: Hotkey doppelt antippen = Aufnahme rastet ein
+    "handsfree": True,
+    # Handy darf Text direkt an der Mac-Cursor-Position einfügen
+    "phone_insert": True,
+    # Handy darf den Diktat-Verlauf des Macs sehen
+    "share_history": True,
 }
 
 DEFAULT_DICTIONARY = {
@@ -64,6 +78,7 @@ def _save_json(path: Path, data) -> None:
 def ensure_files() -> None:
     """Legt Config-Dateien mit Defaults an, falls sie fehlen."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_FILE.exists():
         _save_json(CONFIG_FILE, DEFAULT_CONFIG)
     if not DICT_FILE.exists():

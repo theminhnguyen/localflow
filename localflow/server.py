@@ -1,5 +1,11 @@
-"""HTTPS-Server für die iPhone-PWA: liefert die Web-App und /api/transcribe."""
+"""HTTPS-Server für die iPhone-PWA: Web-App, /api/transcribe, Verlauf, Status.
 
+Neu: Das Handy kann den erkannten Text direkt an der Mac-Cursor-Position
+einfügen lassen (Fernmikrofon) und den Diktat-Verlauf des Macs sehen —
+beides über Schalter in den Einstellungen abschaltbar.
+"""
+
+import json
 import logging
 import socket
 import subprocess
@@ -16,6 +22,7 @@ log = logging.getLogger("localflow.server")
 
 WEB_DIR = Path(__file__).parent / "web"
 CERT_DIR = config.CONFIG_DIR / "certs"
+_START_TIME = time.time()
 
 
 def lan_ip() -> str:
@@ -62,26 +69,58 @@ def lan_ip() -> str:
     return "127.0.0.1"
 
 
+def tailscale_ip():
+    """Tailscale-IP des Macs, falls Tailscale installiert und verbunden — sonst None.
+
+    Damit funktioniert das Handy-Diktat auch unterwegs (Mac muss laufen).
+    """
+    for cli in ("/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+                "/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale"):
+        if not Path(cli).exists():
+            continue
+        try:
+            r = subprocess.run([cli, "ip", "-4"], capture_output=True,
+                               text=True, timeout=3)
+            ip = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+            if r.returncode == 0 and ip.startswith("100."):
+                return ip
+        except (OSError, subprocess.SubprocessError, IndexError):
+            pass
+    return None
+
+
 def ensure_cert() -> tuple:
-    """Erzeugt einmalig ein selbstsigniertes Zertifikat (openssl ist bei macOS dabei)."""
+    """Selbstsigniertes Zertifikat; wird neu erzeugt, wenn sich die IPs ändern."""
     CERT_DIR.mkdir(parents=True, exist_ok=True)
     cert, key = CERT_DIR / "cert.pem", CERT_DIR / "key.pem"
-    if not (cert.exists() and key.exists()):
-        ip = lan_ip()
+    marker = CERT_DIR / "sans.json"
+
+    ips = [ip for ip in (lan_ip(), tailscale_ip()) if ip]
+    try:
+        old = json.loads(marker.read_text()) if marker.exists() else []
+    except (OSError, json.JSONDecodeError):
+        old = []
+
+    if not (cert.exists() and key.exists()) or sorted(old) != sorted(ips):
+        san = "subjectAltName=DNS:localhost,IP:127.0.0.1" + "".join(
+            f",IP:{ip}" for ip in ips)
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
              "-keyout", str(key), "-out", str(cert), "-days", "3650", "-nodes",
-             "-subj", "/CN=LocalFlow",
-             "-addext", f"subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{ip}"],
+             "-subj", "/CN=LocalFlow", "-addext", san],
             check=True, capture_output=True,
         )
-        log.info("Selbstsigniertes Zertifikat erzeugt: %s", cert)
+        marker.write_text(json.dumps(ips))
+        log.info("Zertifikat erzeugt für %s", ips)
     return str(cert), str(key)
 
 
-def create_app(engine, get_language) -> Flask:
-    """engine: Engine-Instanz. get_language: Callable -> aktuelle Sprach-Einstellung."""
+def create_app(engine, get_language, controller=None) -> Flask:
+    """engine: Engine. get_language: Callable. controller: FlowController (optional)."""
     app = Flask(__name__, static_folder=None)
+
+    def cfg() -> dict:
+        return controller.cfg if controller is not None else config.load_config()
 
     @app.get("/")
     def index():
@@ -93,12 +132,47 @@ def create_app(engine, get_language) -> Flask:
 
     @app.get("/api/ping")
     def ping():
-        return jsonify(ok=True, model=engine.repo, loaded=engine.loaded)
+        c = cfg()
+        return jsonify(ok=True, model=engine.repo, loaded=engine.loaded,
+                       insert_allowed=bool(c.get("phone_insert", True)),
+                       history_allowed=bool(c.get("share_history", True)))
+
+    @app.get("/api/history")
+    def history():
+        if not cfg().get("share_history", True):
+            return jsonify(enabled=False, entries=[])
+        entries = [
+            {"text": e.get("text", ""), "source": e.get("source", "?"),
+             "seconds": e.get("seconds", 0), "time": e.get("time", 0),
+             "language": e.get("language", "")}
+            for e in config.load_history()[:30]
+        ]
+        return jsonify(enabled=True, entries=entries)
+
+    @app.get("/api/status")
+    def status():
+        from . import llm
+
+        c = cfg()
+        body = {
+            "model": engine.repo, "loaded": engine.loaded,
+            "uptime_s": int(time.time() - _START_TIME),
+            "llm": {"enabled": bool(c.get("llm_enabled")),
+                    "model": c.get("llm_model"), "available": llm.available()},
+            "lan_ip": lan_ip(), "tailscale_ip": tailscale_ip(),
+            "port": c.get("server_port", 8790),
+        }
+        if controller is not None:
+            body["stats"] = dict(controller.stats)
+            body["state"] = controller.state
+        return jsonify(**body)
 
     @app.post("/api/transcribe")
     def transcribe():
-        from .audio import decode_upload
+        from . import llm
+        from .audio import decode_upload, is_silent
 
+        c = cfg()
         f = request.files.get("audio")
         if f is None:
             return jsonify(error="Feld 'audio' fehlt"), 400
@@ -114,10 +188,7 @@ def create_app(engine, get_language) -> Flask:
 
         if len(audio) < 1600:  # < 0,1 s
             return jsonify(error="Aufnahme zu kurz"), 400
-
-        from .audio import is_silent
-
-        if is_silent(audio, config.load_config().get("silence_rms", 0.006)):
+        if is_silent(audio, c.get("silence_rms", 0.006)):
             return jsonify(text="", raw="", language="", seconds=0, ms=0,
                            note="Stille erkannt — nichts transkribiert")
 
@@ -127,23 +198,44 @@ def create_app(engine, get_language) -> Flask:
         )
         text = clean(result["text"], result["language"],
                      dictionary, config.load_snippets())
-        config.add_history({
-            "text": text, "raw": result["text"], "language": result["language"],
-            "seconds": result["seconds"], "source": "phone", "time": time.time(),
-        })
-        log.info("Handy-Diktat (%ss Audio, %sms): %s",
-                 result["seconds"], result["ms"], text[:80])
+        text, llm_used = llm.maybe_polish(text, c)
+
+        inserted = False
+        if request.form.get("insert") == "1" and text:
+            if c.get("phone_insert", True):
+                from .inserter import insert_text
+
+                inserted = insert_text(text, c.get("insert_mode", "paste"))
+            else:
+                log.info("Handy-Einfügen angefragt, aber in den Einstellungen aus")
+
+        if text:
+            config.add_history({
+                "text": text, "raw": result["text"], "language": result["language"],
+                "seconds": result["seconds"], "source": "phone", "time": time.time(),
+            })
+            if controller is not None:
+                controller.history_dirty = True
+                controller.stats["count"] += 1
+                controller.stats["audio_s"] += result["seconds"]
+                controller.stats["engine_ms"] += result["ms"]
+                if llm_used:
+                    controller.stats["llm_used"] += 1
+        log.info("Handy-Diktat (%ss Audio, %sms%s%s): %s",
+                 result["seconds"], result["ms"],
+                 ", LLM" if llm_used else "",
+                 ", eingefügt" if inserted else "", text[:80])
         return jsonify(
             text=text, raw=result["text"], language=result["language"],
-            seconds=result["seconds"], ms=result["ms"],
+            seconds=result["seconds"], ms=result["ms"], inserted=inserted,
         )
 
     return app
 
 
-def start_server(engine, get_language, port: int) -> threading.Thread:
+def start_server(engine, get_language, port: int, controller=None) -> threading.Thread:
     """Startet den HTTPS-Server in einem Daemon-Thread."""
-    app = create_app(engine, get_language)
+    app = create_app(engine, get_language, controller=controller)
     cert, key = ensure_cert()
 
     def run():

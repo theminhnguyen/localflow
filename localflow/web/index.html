@@ -45,14 +45,23 @@
   .card button.copied { background: var(--ok); }
   .hint { color: var(--muted); text-align: center; font-size: 14px; margin: auto; line-height: 1.6; padding: 0 20px; }
   .error { color: var(--rec); }
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 210px);
+    background: var(--ok); color: #04281a; font-weight: 700; font-size: 14px;
+    padding: 10px 18px; border-radius: 999px; opacity: 0; transition: opacity .25s;
+    pointer-events: none; z-index: 10;
+  }
+  .toast.show { opacity: 1; }
 
-  #controls { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 10px; }
-  #langRow { display: flex; gap: 8px; }
-  #langRow button {
+  #controls { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 10px; }
+  .chipRow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .chipRow button {
     background: var(--card); color: var(--muted); border: 1px solid #2a3040;
     border-radius: 999px; padding: 6px 14px; font-size: 13px;
   }
-  #langRow button.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chipRow button.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chipRow button.sel.insert { background: var(--ok); border-color: var(--ok); color: #04281a; font-weight: 700; }
 
   #mic {
     width: 108px; height: 108px; border-radius: 50%; border: 0;
@@ -80,14 +89,17 @@
 </header>
 
 <div id="result">
-  <p class="hint" id="hint">Tippe auf den Mikrofon-Button, sprich,<br>tippe erneut zum Stoppen.<br><br>Der Text wird lokal auf deinem Mac<br>transkribiert — nichts geht ins Internet.</p>
+  <p class="hint" id="hint">Tippe auf den Mikrofon-Button, sprich,<br>tippe erneut zum Stoppen.<br><br>Der Text wird lokal auf deinem Mac<br>transkribiert — nichts geht ins Internet.<br><br>💡 „→ Mac": Text landet direkt an der<br>Cursor-Position deines Macs.</p>
 </div>
 
+<div class="toast" id="toast">Am Mac eingefügt ✓</div>
+
 <div id="controls">
-  <div id="langRow">
+  <div class="chipRow">
     <button data-lang="auto">Auto</button>
     <button data-lang="de">Deutsch</button>
     <button data-lang="en">English</button>
+    <button id="insertChip" class="insert">→ Mac</button>
   </div>
   <button id="mic" aria-label="Aufnahme">🎙️</button>
   <div id="micLabel"></div>
@@ -97,15 +109,30 @@
 const $ = id => document.getElementById(id);
 const state = { recorder: null, chunks: [], recording: false, busy: false, t0: 0, timerId: 0 };
 let lang = localStorage.getItem("lf_lang") || "auto";
+let insertMode = localStorage.getItem("lf_insert") === "1";
+let insertAllowed = true;
 
 // ---- Sprache wählen ----
-document.querySelectorAll("#langRow button").forEach(b => {
+document.querySelectorAll(".chipRow button[data-lang]").forEach(b => {
   if (b.dataset.lang === lang) b.classList.add("sel");
   b.onclick = () => {
     lang = b.dataset.lang; localStorage.setItem("lf_lang", lang);
-    document.querySelectorAll("#langRow button").forEach(x => x.classList.toggle("sel", x === b));
+    document.querySelectorAll(".chipRow button[data-lang]").forEach(x => x.classList.toggle("sel", x === b));
   };
 });
+
+// ---- „Am Mac einfügen"-Modus ----
+function renderInsertChip() {
+  const chip = $("insertChip");
+  chip.classList.toggle("sel", insertMode && insertAllowed);
+  chip.style.display = insertAllowed ? "" : "none";
+}
+$("insertChip").onclick = () => {
+  insertMode = !insertMode;
+  localStorage.setItem("lf_insert", insertMode ? "1" : "0");
+  renderInsertChip();
+};
+renderInsertChip();
 
 // ---- Server-Status ----
 async function ping() {
@@ -113,14 +140,18 @@ async function ping() {
     const r = await fetch("/api/ping"); const j = await r.json();
     $("dot").className = "dot on";
     $("statusText").textContent = j.loaded ? "bereit" : "Modell lädt…";
+    insertAllowed = j.insert_allowed !== false;
+    renderInsertChip();
   } catch { $("dot").className = "dot off"; $("statusText").textContent = "Mac nicht erreichbar"; }
 }
 ping(); setInterval(ping, 5000);
 
-// ---- Verlauf ----
-function history() { try { return JSON.parse(localStorage.getItem("lf_history") || "[]"); } catch { return []; } }
-function saveHistory(h) { localStorage.setItem("lf_history", JSON.stringify(h.slice(0, 20))); }
-function addCard(text, meta, isError) {
+// ---- Verlauf (Mac-Verlauf, wenn freigegeben; sonst lokaler Fallback) ----
+function localHistory() { try { return JSON.parse(localStorage.getItem("lf_history") || "[]"); } catch { return []; } }
+function saveLocalHistory(h) { localStorage.setItem("lf_history", JSON.stringify(h.slice(0, 20))); }
+
+function addCard(text, meta, isError, atTop = true) {
+  if (!text && !isError) return;
   $("hint")?.remove();
   const card = document.createElement("div");
   card.className = "card" + (isError ? " error" : "");
@@ -140,9 +171,23 @@ function addCard(text, meta, isError) {
     };
     row.append(m, btn); card.appendChild(row);
   }
-  $("result").prepend(card);
+  atTop ? $("result").prepend(card) : $("result").appendChild(card);
 }
-history().forEach(h => addCard(h.text, h.meta));
+
+async function loadHistory() {
+  try {
+    const r = await fetch("/api/history"); const j = await r.json();
+    if (j.enabled && j.entries?.length) {
+      j.entries.slice(0, 20).forEach(e => {
+        const icon = e.source === "phone" ? "📱" : "💻";
+        addCard(e.text, icon + " · " + (e.seconds || "?") + "s", false, false);
+      });
+      return;
+    }
+  } catch {}
+  localHistory().forEach(h => addCard(h.text, h.meta, false, false));
+}
+loadHistory();
 
 // ---- Aufnahme ----
 function pickMime() {
@@ -178,6 +223,11 @@ function stopRec() {
   state.recorder.stop();
 }
 
+function showToast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
+
 async function upload() {
   const mime = state.recorder?.mimeType || "audio/mp4";
   const ext = mime.includes("webm") ? "webm" : "m4a";
@@ -185,13 +235,16 @@ async function upload() {
   const fd = new FormData();
   fd.append("audio", blob, "aufnahme." + ext);
   if (lang !== "auto") fd.append("language", lang);
+  if (insertMode && insertAllowed) fd.append("insert", "1");
   try {
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Server-Fehler");
-    const meta = j.seconds + "s · " + (j.language || "?") + " · " + j.ms + "ms";
+    if (!j.text) { $("micLabel").textContent = ""; showToast("Nur Stille erkannt"); return; }
+    const meta = "📱 · " + j.seconds + "s · " + (j.language || "?") + " · " + j.ms + "ms" + (j.inserted ? " · → Mac ✓" : "");
     addCard(j.text, meta);
-    const h = history(); h.unshift({ text: j.text, meta }); saveHistory(h);
+    if (j.inserted) showToast("Am Mac eingefügt ✓");
+    const h = localHistory(); h.unshift({ text: j.text, meta }); saveLocalHistory(h);
   } catch (e) {
     addCard("Fehler: " + e.message, "", true);
   } finally {

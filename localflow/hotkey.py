@@ -1,4 +1,10 @@
-"""Globaler Hold-to-talk-Hotkey über pynput (braucht Eingabemonitoring-Berechtigung)."""
+"""Globaler Hold-to-talk-Hotkey über pynput (braucht Eingabemonitoring-Berechtigung).
+
+Zusätzlich: direkte Abfrage des physischen Tastenzustands über Quartz.
+Damit kann ein Wächter erkennen, dass die Taste längst losgelassen wurde,
+auch wenn das Loslassen-Ereignis verloren ging (z.B. weil das simulierte ⌘V
+des vorigen Diktats dazwischenfunkte) — der Fix für den „roter Kreis hängt"-Bug.
+"""
 
 import logging
 
@@ -53,10 +59,56 @@ class HotkeyListener:
         self._listener.daemon = True
         self._listener.start()
 
+    def reset(self) -> None:
+        """Interne Druck-Markierung zurücksetzen (nach Wächter-Rettung)."""
+        self._down = False
+
     def stop(self) -> None:
         if self._listener:
             self._listener.stop()
             self._listener = None
+
+
+# ---- Physischer Tastenzustand (Quartz) ----
+
+def _flags():
+    import Quartz
+
+    return Quartz.CGEventSourceFlagsState(Quartz.kCGEventSourceStateHIDSystemState)
+
+
+def physically_down(key_name: str) -> bool:
+    """Ist die Hotkey-Taste gerade wirklich gedrückt?
+
+    Für F-Tasten gibt es kein Modifier-Flag -> True (Wächter bleibt dann neutral
+    und greift nur über den Zeit-Deckel ein).
+    """
+    try:
+        import Quartz
+
+        masks = {
+            "alt_r": Quartz.kCGEventFlagMaskAlternate,
+            "cmd_r": Quartz.kCGEventFlagMaskCommand,
+            "ctrl_r": Quartz.kCGEventFlagMaskControl,
+        }
+        mask = masks.get(key_name)
+        if mask is None:
+            return True
+        return bool(_flags() & mask)
+    except Exception:
+        return True  # im Zweifel nicht eingreifen
+
+
+def any_modifier_down() -> bool:
+    """Hält der Nutzer gerade ⌘/⌥/⌃/⇧ gedrückt? (Fürs saubere Einfügen.)"""
+    try:
+        import Quartz
+
+        combo = (Quartz.kCGEventFlagMaskCommand | Quartz.kCGEventFlagMaskAlternate
+                 | Quartz.kCGEventFlagMaskControl | Quartz.kCGEventFlagMaskShift)
+        return bool(_flags() & combo)
+    except Exception:
+        return False
 
 
 def permissions_status() -> dict:

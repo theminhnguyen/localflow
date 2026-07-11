@@ -2,8 +2,11 @@
 
 Standard: Zwischenablage setzen -> ⌘V simulieren -> Zwischenablage wiederherstellen.
 Alternative ("type"): Zeichen einzeln tippen (langsamer, lässt Clipboard unberührt).
-Hinweis: Nicht-Text-Inhalte (Bilder) in der Zwischenablage gehen beim Wiederherstellen
-verloren — Text bleibt erhalten.
+
+Wichtig gegen den „roter Kreis hängt"-Bug: Vor dem simulierten ⌘V warten wir,
+bis der Nutzer KEINE Modifier-Taste (⌥/⌘/⌃/⇧) mehr hält. Sonst würde aus ⌘V
+z.B. ⌘⌥V (falscher Befehl in vielen Apps), und das künstliche Tasten-Ereignis
+könnte den Hotkey-Listener aus dem Tritt bringen.
 """
 
 import logging
@@ -34,6 +37,23 @@ def _press_cmd_v() -> None:
     )
 
 
+def _wait_modifiers_clear(timeout: float = 4.0) -> None:
+    """Wartet, bis keine Modifier-Taste mehr gedrückt ist (max. timeout Sekunden)."""
+    try:
+        from .hotkey import any_modifier_down
+    except ImportError:
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if not any_modifier_down():
+                return
+        except Exception:
+            return
+        time.sleep(0.05)
+    log.debug("Modifier nach %.1fs immer noch gedrückt — füge trotzdem ein", timeout)
+
+
 def insert_text(text: str, mode: str = "paste") -> bool:
     """Fügt text in die aktive App ein. True bei Erfolg."""
     if not text:
@@ -48,6 +68,7 @@ def _insert_by_paste(text: str) -> bool:
     try:
         _pbcopy(text)
         time.sleep(0.05)  # Clipboard-Sync abwarten
+        _wait_modifiers_clear()
         _press_cmd_v()
     except subprocess.CalledProcessError as e:
         log.error("Einfügen fehlgeschlagen (Bedienungshilfen-Berechtigung fehlt?): %s",
@@ -72,6 +93,7 @@ def _insert_by_typing(text: str) -> bool:
     try:
         from pynput.keyboard import Controller
 
+        _wait_modifiers_clear()
         Controller().type(text)
         return True
     except Exception:
