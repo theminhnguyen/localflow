@@ -58,9 +58,13 @@ class Engine:
 
         if language in (None, "", "auto"):
             language = None
+        # initial_prompt als schlichte Wortliste (ohne einleitende Wörter wie
+        # "Glossar:", die Whisper sonst wörtlich in die Ausgabe echot).
         initial_prompt = None
         if prompt_terms:
-            initial_prompt = "Glossar: " + ", ".join(prompt_terms)
+            terms = [t.strip() for t in prompt_terms if t and t.strip()]
+            if terms:
+                initial_prompt = ", ".join(terms)
 
         start = time.monotonic()
         # mlx ist nicht thread-sicher -> immer nur eine Transkription gleichzeitig

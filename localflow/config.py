@@ -45,8 +45,10 @@ DEFAULT_CONFIG = {
 }
 
 DEFAULT_DICTIONARY = {
-    # Begriffe, die Whisper als Kontext-Hinweis bekommt (Eigennamen, Fachwörter)
-    "terms": ["LocalFlow"],
+    # Begriffe, die Whisper als Kontext-Hinweis bekommt (Eigennamen, Fachwörter).
+    # Standardmäßig leer: ein initial_prompt kann sonst in ruhigen/kurzen Aufnahmen
+    # wörtlich in die Ausgabe geechot werden. Nur bewusst gepflegte Begriffe nutzen.
+    "terms": [],
     # Ersetzungen im fertigen Text: "falsch erkannt" -> "richtig"
     "corrections": {},
 }

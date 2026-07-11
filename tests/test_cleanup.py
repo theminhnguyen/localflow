@@ -65,3 +65,36 @@ def test_empty():
 
 def test_capitalize_first():
     assert clean("das ist ein test.", "de") == "Das ist ein test."
+
+
+def test_initial_prompt_is_plain_wordlist(monkeypatch):
+    """Regression: initial_prompt ist eine schlichte Wortliste ohne Einleitung wie
+    'Glossar:', die Whisper sonst wörtlich in die Ausgabe echot."""
+    import sys
+    import types
+    from pathlib import Path
+
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from localflow.engine import Engine
+
+    captured = {}
+    fake = types.ModuleType("mlx_whisper")
+
+    def fake_transcribe(audio, **kw):
+        captured["initial_prompt"] = kw.get("initial_prompt")
+        return {"text": "ok", "language": "de"}
+
+    fake.transcribe = fake_transcribe
+    monkeypatch.setitem(sys.modules, "mlx_whisper", fake)
+
+    eng = Engine("turbo")
+    eng.transcribe(np.zeros(16000, dtype=np.float32), language="de",
+                   prompt_terms=["LocalFlow", "Whisper"])
+    assert captured["initial_prompt"] == "LocalFlow, Whisper"
+    assert "Glossar" not in (captured["initial_prompt"] or "")
+
+    # Keine Terms -> gar kein Prompt (nichts kann geechot werden)
+    eng.transcribe(np.zeros(16000, dtype=np.float32), language="de", prompt_terms=[])
+    assert captured["initial_prompt"] is None
