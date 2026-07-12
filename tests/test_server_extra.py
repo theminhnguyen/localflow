@@ -33,6 +33,14 @@ class FakeController:
         self.history_dirty = False
         self.stats = {"count": 0, "audio_s": 0.0, "engine_ms": 0, "llm_used": 0}
         self.state = "idle"
+        self.noted = []
+
+    def effective_language(self):
+        lang = self.cfg.get("language", "auto")
+        return lang if lang != "auto" else None
+
+    def note_detected_language(self, language, text):
+        self.noted.append((language, bool(text)))
 
 
 def wav_bytes(seconds=1.0, amplitude=0.1):

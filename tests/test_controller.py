@@ -61,6 +61,9 @@ def make_controller(**cfg_extra):
     c._phys_down = lambda: True
     # Config-Speichern in Tests neutralisieren
     c.set_toggle = lambda k, v: c.cfg.__setitem__(k, v)
+    import localflow.config as _cfg
+    _orig_save = _cfg.save_config
+    _cfg.save_config = lambda cfg: None
     # Worker-Thread wie in start(), aber ohne Hotkey/Berechtigungen
     import threading
 
@@ -183,3 +186,36 @@ def test_silence_not_inserted():
     press_hold_release(c)
     assert wait_idle(c)
     assert c.inserted == []
+
+
+def test_language_cache_reuses_detected():
+    c = make_controller(language="auto", language_redetect_every=5)
+    # 1. Diktat: echte Auto-Erkennung (None), Engine meldet "de"
+    assert c.effective_language() is None
+    c.note_detected_language("de", "Hallo")
+    # 2.-4. Diktat: Cache greift
+    assert c.effective_language() == "de"
+    c.note_detected_language("de", "Hallo")
+    assert c.effective_language() == "de"
+
+
+def test_language_cache_resets_on_menu_change():
+    c = make_controller(language="auto")
+    c.note_detected_language("de", "Hallo")
+    assert c.effective_language() == "de"
+    c.set_language("en")
+    assert c.effective_language() == "en"   # fest gewählt
+    c.set_language("auto")
+    assert c.effective_language() is None    # Cache wurde geleert
+
+
+def test_language_cache_resets_on_empty_result():
+    c = make_controller(language="auto")
+    c.note_detected_language("de", "Hallo")
+    c.note_detected_language("de", "")       # leeres Ergebnis
+    assert c.effective_language() is None
+
+
+def test_fixed_language_bypasses_cache():
+    c = make_controller(language="de")
+    assert c.effective_language() == "de"

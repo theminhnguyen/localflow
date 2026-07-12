@@ -39,6 +39,29 @@ SYSTEM_PROMPT = (
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
 _FENCE_RE = re.compile(r"^```[a-z]*\n(.*?)\n```$", re.S)
 
+# 🚀 Schnell-Modus: Anzeichen, dass der Text den LLM-Feinschliff wirklich braucht —
+# Selbstkorrekturen, Streichungen oder gesprochene Aufzählungen.
+_TRIGGER_RE = re.compile(
+    r"(?i)\b(nein|ne warte|warte|ich mein(e|te)|quatsch|falsch|korrektur|"
+    r"streich das|vergiss das|"
+    r"erstens|zweitens|drittens|viertens|punkt (eins|zwei|drei|vier)|"
+    r"actually|i meant?|no wait|scratch that|forget that|"
+    r"first(ly)?|second(ly)?|third(ly)?)\b"
+)
+
+
+def needs_polish(text: str, cfg: dict) -> bool:
+    """Schnell-Modus: lohnt sich das LLM für diesen Text überhaupt?
+
+    True bei Korrektur-/Aufzählungs-Anzeichen oder langen Diktaten.
+    Kurze, saubere Sätze überspringen das LLM komplett (~1s gespart).
+    """
+    if not cfg.get("llm_smart", True):
+        return True
+    if _TRIGGER_RE.search(text):
+        return True
+    return len(text.split()) >= int(cfg.get("llm_smart_min_words", 14))
+
 
 # ---------- HTTP-Helfer ----------
 
@@ -144,17 +167,20 @@ def polish(text: str, cfg: dict, timeout: float = 30.0):
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
+    # Ausgabe ist nie viel länger als die Eingabe -> knappes Token-Budget
+    # (bremst Ausreißer, ohne normale Antworten zu beschneiden)
+    max_tokens = min(1000, max(160, len(text.split()) * 4))
     try:
         if backend == "lmstudio":
             data = _post_json(f"{base}/chat/completions", {
                 "model": model, "messages": messages,
-                "temperature": 0.2, "max_tokens": 1000, "stream": False,
+                "temperature": 0.2, "max_tokens": max_tokens, "stream": False,
             }, timeout)
             out = (data["choices"][0]["message"]["content"] or "").strip()
         else:  # ollama
             data = _post_json(f"{base}/api/chat", {
                 "model": model, "messages": messages, "stream": False,
-                "options": {"temperature": 0.2, "num_predict": 1000},
+                "options": {"temperature": 0.2, "num_predict": max_tokens},
             }, timeout)
             out = ((data.get("message") or {}).get("content") or "").strip()
     except (urllib.error.URLError, OSError, ValueError, KeyError,
@@ -192,6 +218,8 @@ def maybe_polish(text: str, cfg: dict):
     if not cfg.get("llm_enabled", False):
         return text, False
     if len(text.strip()) < 3:
+        return text, False
+    if not needs_polish(text, cfg):  # 🚀 Schnell-Modus
         return text, False
     out = polish(text, cfg, float(cfg.get("llm_timeout", 30)))
     if out is None:

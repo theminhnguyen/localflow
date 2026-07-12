@@ -23,7 +23,8 @@ MODELS = [("Groß & präzise (turbo)", "turbo"), ("Klein & flott (small)", "smal
 
 # (Menü-Titel, Config-Schlüssel)
 TOGGLES = [
-    ("✨ KI-Feinschliff (Ollama)", "llm_enabled"),
+    ("✨ KI-Feinschliff (lokales LLM)", "llm_enabled"),
+    ("🚀 Schnell-Modus: KI nur bei Bedarf", "llm_smart"),
     ("👐 Freihand: Doppel-Tipp rastet ein", "handsfree"),
     ("📲 Handy darf am Mac einfügen", "phone_insert"),
     ("🕘 Verlauf fürs Handy freigeben", "share_history"),

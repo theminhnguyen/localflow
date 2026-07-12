@@ -27,7 +27,8 @@ def test_polish_error_falls_back(monkeypatch):
 
 def test_polish_success(monkeypatch):
     monkeypatch.setattr(llm, "polish", lambda *a, **k: "Hallo, Welt!")
-    text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
+    text, used = llm.maybe_polish("Hallo Welt.",
+                                  {"llm_enabled": True, "llm_smart": False})
     assert text == "Hallo, Welt!" and used is True
 
 
@@ -97,3 +98,34 @@ def test_maybe_polish_skips_without_backend(monkeypatch):
     called = []
     text, used = llm.maybe_polish("Hallo Welt.", {"llm_enabled": True})
     assert used is False and text == "Hallo Welt."
+
+
+# ---- 🚀 Schnell-Modus ----
+
+def test_needs_polish_skips_short_clean():
+    cfg = {"llm_smart": True, "llm_smart_min_words": 14}
+    assert llm.needs_polish("Bitte schick mir die Unterlagen bis morgen.", cfg) is False
+
+
+def test_needs_polish_triggers_on_correction():
+    cfg = {"llm_smart": True}
+    assert llm.needs_polish("Treffen um zwei, nein, um drei.", cfg) is True
+    assert llm.needs_polish("Erstens das Angebot, zweitens die Preise.", cfg) is True
+    assert llm.needs_polish("Meeting monday no wait tuesday.", cfg) is True
+
+
+def test_needs_polish_triggers_on_length():
+    cfg = {"llm_smart": True, "llm_smart_min_words": 5}
+    assert llm.needs_polish("eins zwei drei vier fünf sechs", cfg) is True
+
+
+def test_needs_polish_off_means_always():
+    assert llm.needs_polish("Kurz.", {"llm_smart": False}) is True
+
+
+def test_maybe_polish_smart_skip(monkeypatch):
+    called = []
+    monkeypatch.setattr(llm, "polish", lambda *a, **k: called.append(1) or "X")
+    text, used = llm.maybe_polish(
+        "Bitte schick mir die Unterlagen.", {"llm_enabled": True, "llm_smart": True})
+    assert used is False and called == []

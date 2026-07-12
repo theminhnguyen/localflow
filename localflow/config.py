@@ -41,6 +41,13 @@ DEFAULT_CONFIG = {
     # das erste geladene Chat-Modell.
     "llm_model": "gemma",
     "llm_timeout": 30,
+    # 🚀 Schnell-Modus: LLM nur anwenden, wenn der Text es braucht
+    # (Korrektur-Wörter, Aufzählungen oder lange Diktate) — spart ~1s pro Diktat
+    "llm_smart": True,
+    "llm_smart_min_words": 14,
+    # Bei Sprache "auto": erkannte Sprache wiederverwenden (spart ~0,7s);
+    # alle N Diktate wird sicherheitshalber neu erkannt
+    "language_redetect_every": 8,
     # Freihand-Modus: Hotkey doppelt antippen = Aufnahme rastet ein
     "handsfree": True,
     # Handy darf Text direkt an der Mac-Cursor-Position einfügen

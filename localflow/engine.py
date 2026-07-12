@@ -75,6 +75,9 @@ class Engine:
                 language=language,
                 initial_prompt=initial_prompt,
                 fp16=True,
+                # Diktate sind Einzel-Äußerungen: kein Konditionieren auf vorigen
+                # Text (etwas schneller, weniger Wiederhol-Halluzinationen)
+                condition_on_previous_text=False,
             )
             self._loaded = True
         ms = int((time.monotonic() - start) * 1000)

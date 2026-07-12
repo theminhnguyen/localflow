@@ -29,7 +29,32 @@ def _pbcopy(text: str) -> None:
     subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
 
 
+def _post_cmd_v_quartz() -> bool:
+    """Schneller Weg: ⌘V direkt als CGEvent posten (~200ms flotter als osascript).
+
+    Nur wenn die Bedienungshilfen-Berechtigung sicher da ist — ohne sie würden
+    die Events lautlos verpuffen, während osascript wenigstens laut scheitert.
+    """
+    try:
+        import Quartz
+
+        if not Quartz.CGPreflightPostEventAccess():
+            return False
+        v_key = 9  # kVK_ANSI_V (gleiche Position auf QWERTY und QWERTZ)
+        src = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
+        for is_down in (True, False):
+            ev = Quartz.CGEventCreateKeyboardEvent(src, v_key, is_down)
+            Quartz.CGEventSetFlags(ev, Quartz.kCGEventFlagMaskCommand)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        return True
+    except Exception:
+        log.debug("Quartz-Paste nicht möglich, nutze osascript", exc_info=True)
+        return False
+
+
 def _press_cmd_v() -> None:
+    if _post_cmd_v_quartz():
+        return
     subprocess.run(
         ["osascript", "-e",
          'tell application "System Events" to keystroke "v" using command down'],

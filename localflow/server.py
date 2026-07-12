@@ -179,7 +179,13 @@ def create_app(engine, get_language, controller=None) -> Flask:
         if len(blob) < 100:
             return jsonify(error="Audio leer"), 400
 
-        language = request.form.get("language") or get_language()
+        language = request.form.get("language")
+        if not language:
+            # Sprach-Cache des Controllers nutzen (spart die teure Auto-Erkennung)
+            if controller is not None:
+                language = controller.effective_language()
+            else:
+                language = get_language()
         try:
             audio = decode_upload(blob, f.filename or "audio.m4a")
         except ValueError as e:
@@ -197,7 +203,11 @@ def create_app(engine, get_language, controller=None) -> Flask:
         )
         text = clean(result["text"], result["language"],
                      dictionary, config.load_snippets())
+        if controller is not None and not request.form.get("language"):
+            controller.note_detected_language(result["language"], text)
+        t_llm = time.time()
         text, llm_used = llm.maybe_polish(text, c)
+        llm_ms = int((time.time() - t_llm) * 1000) if llm_used else 0
 
         inserted = False
         if request.form.get("insert") == "1" and text:
@@ -226,7 +236,8 @@ def create_app(engine, get_language, controller=None) -> Flask:
                  ", eingefügt" if inserted else "", text[:80])
         return jsonify(
             text=text, raw=result["text"], language=result["language"],
-            seconds=result["seconds"], ms=result["ms"], inserted=inserted,
+            seconds=result["seconds"], ms=result["ms"], llm_ms=llm_ms,
+            inserted=inserted,
         )
 
     return app

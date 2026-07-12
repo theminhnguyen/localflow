@@ -66,6 +66,9 @@ class FlowController:
 
         self._insert = insert_text
         self._phys_down = None  # wird in start() gesetzt
+        # Sprach-Cache für "auto": erkannte Sprache wiederverwenden (~0,7s schneller)
+        self._lang_cache = None
+        self._lang_count = 0
 
     # ---- Zustand für die Menüleiste ----
 
@@ -107,9 +110,29 @@ class FlowController:
     def set_language(self, code: str) -> None:
         self.cfg["language"] = code
         config.save_config(self.cfg)
+        self._lang_cache = None  # Cache verwerfen, Nutzer hat umgestellt
 
     def get_language(self) -> str:
         return self.cfg.get("language", "auto")
+
+    def effective_language(self):
+        """Sprache für die Engine: fest gewählte direkt; bei "auto" die zuletzt
+        erkannte (spart die teure Erkennung), mit periodischer Neu-Erkennung."""
+        lang = self.get_language()
+        if lang != "auto":
+            return lang
+        every = max(1, int(self.cfg.get("language_redetect_every", 8)))
+        if self._lang_cache and self._lang_count % every != 0:
+            return self._lang_cache
+        return None  # echte Auto-Erkennung
+
+    def note_detected_language(self, language: str, text: str) -> None:
+        """Nach jeder Transkription: Cache pflegen."""
+        self._lang_count += 1
+        if text and language:
+            self._lang_cache = language
+        elif not text:
+            self._lang_cache = None  # leeres Ergebnis -> nächstes Mal neu erkennen
 
     def set_toggle(self, key: str, value: bool) -> None:
         self.cfg[key] = value
@@ -256,14 +279,17 @@ class FlowController:
         dictionary = config.load_dictionary()
         result = self.engine.transcribe(
             audio,
-            language=self.get_language(),
+            language=self.effective_language(),
             prompt_terms=dictionary.get("terms") or None,
         )
         text = clean(result["text"], result["language"],
                      dictionary, config.load_snippets())
+        self.note_detected_language(result["language"], text)
         if not text:
             return
+        t_llm = time.monotonic()
         text, llm_used = llm.maybe_polish(text, self.cfg)
+        llm_ms = int((time.monotonic() - t_llm) * 1000)
 
         ok = self._insert(text, self.cfg.get("insert_mode", "paste"))
         if not ok:
@@ -282,8 +308,9 @@ class FlowController:
             "seconds": result["seconds"], "source": "mac", "time": time.time(),
         })
         self.history_dirty = True
-        log.info("Diktat (%ss Audio, %sms%s): %s", result["seconds"], result["ms"],
-                 ", LLM" if llm_used else "", text[:80])
+        log.info("Diktat (%ss Audio | Whisper %sms | LLM %s): %s",
+                 result["seconds"], result["ms"],
+                 f"{llm_ms}ms" if llm_used else "übersprungen 🚀", text[:80])
 
     # ---- Datei-Transkription ----
 
