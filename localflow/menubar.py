@@ -19,7 +19,9 @@ ICONS = {"loading": "🎙…", "idle": "🎙", "rec": "🔴", "busy": "⏳"}
 LANGS = [("Automatisch", "auto"), ("Deutsch", "de"), ("Englisch", "en")]
 HOTKEYS = [("Rechte Option (⌥)", "alt_r"), ("Rechte Command (⌘)", "cmd_r"),
            ("Rechte Control (⌃)", "ctrl_r"), ("F13", "f13")]
-MODELS = [("Groß & präzise (turbo)", "turbo"), ("Klein & flott (small)", "small")]
+MODELS = [("Standard — schneller Start (turbo q4)", "turbo-q4"),
+          ("Maximal präzise (turbo)", "turbo"),
+          ("Klein & flott (small)", "small")]
 
 # (Menü-Titel, Config-Schlüssel)
 TOGGLES = [

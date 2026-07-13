@@ -12,8 +12,9 @@ HISTORY_FILE = CONFIG_DIR / "history.json"
 LOG_DIR = CONFIG_DIR / "logs"
 
 DEFAULT_CONFIG = {
-    # mlx-community-Repo oder Kurzname ("turbo", "small", "base")
-    "model": "turbo",
+    # mlx-community-Repo oder Kurzname ("turbo-q4", "turbo", "small", "base")
+    # turbo-q4: gleiche Qualität wie turbo, lädt aber ~3x schneller beim App-Start
+    "model": "turbo-q4",
     # "auto" = Sprache automatisch erkennen, sonst ISO-Code ("de", "en", ...)
     "language": "auto",
     # Taste zum Gedrückthalten: "alt_r" (rechte Option), "cmd_r", "ctrl_r", "f13"

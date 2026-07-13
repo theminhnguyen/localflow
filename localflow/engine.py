@@ -10,6 +10,9 @@ log = logging.getLogger("localflow.engine")
 
 # Kurznamen -> Hugging-Face-Repos (werden beim ersten Start automatisch geladen)
 MODELS = {
+    # q4 = 4-bit-quantisiert: gleiche Genauigkeit/Warm-Geschwindigkeit wie turbo,
+    # aber nur ~600MB statt 1,6GB -> App-Start (Modell-Laden) ~3x schneller
+    "turbo-q4": "mlx-community/whisper-large-v3-turbo-q4",
     "turbo": "mlx-community/whisper-large-v3-turbo",
     "small": "mlx-community/whisper-small-mlx",
     "base": "mlx-community/whisper-base-mlx",

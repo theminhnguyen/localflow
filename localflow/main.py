@@ -69,6 +69,7 @@ class FlowController:
         # Sprach-Cache für "auto": erkannte Sprache wiederverwenden (~0,7s schneller)
         self._lang_cache = None
         self._lang_count = 0
+        self._warned_loading = False  # "Modell lädt noch"-Hinweis nur einmal
 
     # ---- Zustand für die Menüleiste ----
 
@@ -276,6 +277,11 @@ class FlowController:
 
         if is_silent(audio, self.cfg.get("silence_rms", 0.006)):
             return  # nur Stille -> nichts einfügen (keine Halluzination)
+        if not self.engine.loaded and not self._warned_loading:
+            # Diktat kam mitten in den Kaltstart -> ehrlich Bescheid geben
+            self._warned_loading = True
+            self.last_error = ("Whisper lädt noch (einmalig nach dem Start) — "
+                               "dein Diktat wird gleich verarbeitet…")
         dictionary = config.load_dictionary()
         result = self.engine.transcribe(
             audio,
