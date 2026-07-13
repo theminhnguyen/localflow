@@ -37,7 +37,7 @@ SOUND_ERROR = "/System/Library/Sounds/Basso.aiff"
 # Tipp-Erkennung für den Freihand-Modus
 TAP_MAX_S = 0.35       # kürzer als das = "Tipp" statt Diktat
 DOUBLE_TAP_S = 0.6     # zwei Tipps innerhalb dieser Zeit = Freihand-Start
-STUCK_GRACE_S = 0.8    # so lange darf "Taste unten ohne Flag" bestehen, bevor gerettet wird
+STUCK_GRACE_S = 0.35   # so lange darf "Taste unten ohne Flag" bestehen, bevor gerettet wird
 
 
 class FlowController:
@@ -246,8 +246,11 @@ class FlowController:
         return False
 
     def _watchdog_loop(self) -> None:
+        # Häufig pollen: pynput verschluckt bei rechten Modifier-Tasten oft das
+        # Loslassen-Ereignis. Der Wächter erkennt die physisch losgelassene Taste
+        # dann in ~80ms und beendet die Aufnahme, bevor das rote Icon auffällt.
         while not self._stop:
-            time.sleep(0.25)
+            time.sleep(0.08)
             try:
                 self._watchdog_step()
             except Exception:
@@ -386,6 +389,24 @@ class FlowController:
                 pass
 
 
+def _brand_process() -> None:
+    """Kein 'Python' im Dock/App-Umschalter: Menüleisten-App ohne Dock-Symbol,
+    Prozessname 'LocalFlow'."""
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyAccessory)
+    except Exception:
+        log.debug("Dock-Ausblendung nicht möglich", exc_info=True)
+    try:
+        from Foundation import NSProcessInfo
+
+        NSProcessInfo.processInfo().setProcessName_("LocalFlow")
+    except Exception:
+        pass
+
+
 def _setup_logging() -> None:
     config.ensure_files()
     handlers = [logging.StreamHandler()]
@@ -434,6 +455,8 @@ def main() -> None:
         return
 
     controller.start()
+
+    _brand_process()  # "LocalFlow" statt "Python" im App-Umschalter, kein Dock-Symbol
 
     from .menubar import MenubarApp
 
