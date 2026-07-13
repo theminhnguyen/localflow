@@ -10,6 +10,9 @@ APP="dist/LocalFlow.app"
 DMG="dist/LocalFlow-${VERSION}.dmg"
 
 echo "▸ 1/4  PyInstaller-Build…"
+# Etwaige laufende Test-Instanz beenden (hält sonst Dateien im dist/ offen)
+pkill -9 -f "dist/LocalFlow" 2>/dev/null || true
+sleep 1
 rm -rf build dist
 "$VENV/pyinstaller" packaging/LocalFlow.spec --noconfirm --clean \
   --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1

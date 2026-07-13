@@ -48,6 +48,7 @@ a = Analysis(
     # ausschließen — mlx_whisper.timing braucht scipy.signal für Zeitstempel.
     excludes=["torch", "torchvision", "torchaudio",
               "mlx_whisper.torch_whisper",
+              "numba.tests", "numba.cuda", "llvmlite.tests",
               "tkinter", "PyInstaller", "pytest", "matplotlib", "IPython",
               "pandas", "notebook"],
     noarchive=False,
