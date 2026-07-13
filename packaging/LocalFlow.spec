@@ -2,22 +2,30 @@
 # Bauen:  .venv/bin/pyinstaller packaging/LocalFlow.spec --noconfirm --clean
 # (vom Repo-Wurzelverzeichnis aus, damit "localflow" importierbar ist)
 
+import os
+
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 __version__ = "0.3.0"
 
+# Alle Pfade absolut, relativ zur Repo-Wurzel (SPECPATH = Ordner dieser .spec)
+ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
+
 datas, binaries, hiddenimports = [], [], []
 
 # Pakete mit Datendateien / nativen Libs komplett einsammeln
-for pkg in ("mlx", "mlx_whisper", "rumps", "sounddevice", "qrcode", "PIL",
-            "numba", "llvmlite"):
-    d, b, h = collect_all(pkg)
-    datas += d
-    binaries += b
-    hiddenimports += h
+for pkg in ("mlx", "mlx_whisper", "rumps", "sounddevice", "_sounddevice_data",
+            "qrcode", "PIL", "numba", "llvmlite"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
 
 # Web-App (index.html, sw.js, Icons) muss neben localflow/server.py landen
-datas += [("localflow/web", "localflow/web")]
+datas += [(os.path.join(ROOT, "localflow", "web"), "localflow/web")]
 
 # pyobjc-Frameworks, die wir zur Laufzeit nutzen
 hiddenimports += ["objc", "Foundation", "AppKit", "Quartz", "CoreFoundation"]
@@ -27,14 +35,21 @@ hiddenimports += ["flask", "werkzeug", "jinja2", "pynput",
 
 
 a = Analysis(
-    ["packaging/launcher.py"],
-    pathex=["."],
+    [os.path.join(ROOT, "packaging", "launcher.py")],
+    pathex=[ROOT],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "PyInstaller", "pytest", "matplotlib", "IPython"],
+    # torch nur vom Gewichts-Konverter (torch_whisper) genutzt -> zur Laufzeit
+    # unnötig, spart ~530MB. Ebenso schwere/ungenutzte Pakete raus.
+    # torch nur vom Gewichts-Konverter genutzt (s.o.). scipy dagegen NICHT
+    # ausschließen — mlx_whisper.timing braucht scipy.signal für Zeitstempel.
+    excludes=["torch", "torchvision", "torchaudio",
+              "mlx_whisper.torch_whisper",
+              "tkinter", "PyInstaller", "pytest", "matplotlib", "IPython",
+              "pandas", "notebook"],
     noarchive=False,
 )
 
@@ -59,7 +74,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="LocalFlow.app",
-    icon="packaging/LocalFlow.icns",
+    icon=os.path.join(ROOT, "packaging", "LocalFlow.icns"),
     bundle_identifier="studio.minh.localflow",
     version=__version__,
     info_plist={

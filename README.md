@@ -37,7 +37,23 @@ Alle Funktionen sind unter **⚙️ Einstellungen** im Menüleisten-Menü einzel
 - Optional für den KI-Feinschliff: ein lokales LLM über **LM Studio** *oder* **Ollama**
   (z. B. ein Gemma-Modell) — LocalFlow erkennt automatisch, was läuft
 
-## Installation & Start
+## Installation
+
+### Einfach: DMG (empfohlen)
+
+1. `LocalFlow-x.y.z.dmg` öffnen, **LocalFlow** auf den **Programme**-Ordner ziehen.
+2. In *Programme* LocalFlow per **Rechtsklick → Öffnen** starten (nur beim ersten
+   Mal — die App ist frei/ohne bezahltes Apple-Zertifikat signiert).
+3. macOS fragt nach **Mikrofon**, **Bedienungshilfen** und **Eingabemonitoring**
+   → alle erlauben und LocalFlow einmal neu starten.
+
+Die App bringt Python und alle Bibliotheken selbst mit — keine weitere Installation
+nötig. Beim allerersten Diktat lädt Whisper einmalig das Modell (~600 MB, braucht
+dafür kurz Internet).
+
+**DMG selbst bauen:** `bash packaging/build_dmg.sh` → `dist/LocalFlow-x.y.z.dmg`.
+
+### Für Entwickler: aus dem Quellcode
 
 ```bash
 cd ~/Downloads/localflow
@@ -45,10 +61,6 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m localflow.main
 ```
-
-Bequemer: **LocalFlow.app** (im Programme-Ordner) — startet ohne Terminal-Fenster,
-nur das 🎙 in der Menüleiste. Beim allerersten Start lädt Whisper einmalig das
-Modell (~1,6 GB).
 
 ### KI-Feinschliff einrichten (optional, empfohlen)
 
