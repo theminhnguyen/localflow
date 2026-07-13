@@ -31,9 +31,20 @@ class Engine:
         self._loaded = False
 
     def warmup(self) -> None:
-        """Lädt Modellgewichte vorab (1s Stille transkribieren)."""
-        self.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language="de")
-        log.info("Modell %s geladen", self.repo)
+        """Lädt Modellgewichte vorab und wärmt die GPU-Kernel auf.
+
+        Die ersten 2-3 Inferenzen nach dem Laden kompilieren Metal-Kernel und
+        sind 3-5x langsamer — darum mehrere kurze Durchläufe, damit das erste
+        echte Diktat sofort volle Geschwindigkeit hat.
+        """
+        silence = np.zeros(SAMPLE_RATE, dtype=np.float32)
+        for i in range(3):
+            start = time.monotonic()
+            self.transcribe(silence, language="de")
+            ms = int((time.monotonic() - start) * 1000)
+            if i > 0 and ms < 1200:  # Kernel sind warm -> fertig
+                break
+        log.info("Modell %s geladen & aufgewärmt", self.repo)
 
     def warmup_async(self) -> threading.Thread:
         t = threading.Thread(target=self._safe_warmup, daemon=True)
