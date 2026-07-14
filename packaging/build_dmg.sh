@@ -111,5 +111,15 @@ else
 fi
 rm -rf "$STAGE"
 
+# Gebaute .app aus dist/ entfernen — sie steckt jetzt in der DMG.
+#
+# WARUM: macOS bindet Bedienungshilfen-/Eingabemonitoring-Rechte bei ad-hoc
+# signierten Apps an den DATEIPFAD. Bliebe dist/LocalFlow.app liegen, gäbe es
+# ZWEI "LocalFlow"-Einträge in den Systemeinstellungen — der Nutzer setzt das
+# Häkchen bei der einen, startet aber die andere, und die Rechte "gehen wieder
+# aus". Genau dieser Bug wurde am 2026-07-14 gemeldet.
+rm -rf "$APP" dist/LocalFlow
+
 SIZE="$(du -h "$DMG" | cut -f1)"
 echo "✅ Fertig: $DMG  ($SIZE)"
+echo "   (dist/LocalFlow.app entfernt — verhindert doppelte Berechtigungs-Einträge)"

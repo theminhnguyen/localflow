@@ -123,3 +123,57 @@ def test_progress_hook_never_exceeds_100():
     h = Hook(total=10)
     h.update(50)  # mehr als total (Randfall) -> darf nicht über 100 melden
     assert reported[-1] <= 100
+
+
+# ---- Regressionstests: die drei Bugs vom 2026-07-14 ----
+
+def test_permission_wait_timeout_constant_exists():
+    """Ohne Ausstieg aus der Warteschleife hängt der Assistent endlos, weil
+    CGPreflight* bei ad-hoc signierten Apps auch nach dem Setzen der Häkchen
+    weiter False meldet (Wert ist pro Prozess gecacht)."""
+    assert isinstance(onboarding.PERMISSION_WAIT_TIMEOUT_S, (int, float))
+    assert onboarding.PERMISSION_WAIT_TIMEOUT_S > 0
+
+
+def test_other_app_copies_empty_in_dev_mode(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert onboarding.other_app_copies() == []
+
+
+def test_other_app_copies_excludes_running_copy(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        onboarding, "running_app_path", lambda: "/Applications/LocalFlow.app")
+
+    class FakeRun:
+        stdout = "/Applications/LocalFlow.app\n/Users/x/Downloads/LocalFlow.app\n"
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun())
+    monkeypatch.setattr(onboarding.Path, "exists", lambda self: True)
+
+    others = onboarding.other_app_copies()
+    assert others == ["/Users/x/Downloads/LocalFlow.app"]  # laufende Kopie NICHT dabei
+
+
+def test_other_app_copies_survives_mdfind_failure(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    import subprocess
+
+    def boom(*a, **k):
+        raise OSError("mdfind nicht verfügbar")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert onboarding.other_app_copies() == []  # darf nicht werfen
+
+
+def test_running_app_path_dev_mode(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert "Entwicklungsmodus" in onboarding.running_app_path()
+
+
+def test_running_app_path_frozen_finds_bundle(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        sys, "executable", "/Applications/LocalFlow.app/Contents/MacOS/LocalFlow")
+    assert onboarding.running_app_path() == "/Applications/LocalFlow.app"

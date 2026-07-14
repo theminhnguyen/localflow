@@ -6,6 +6,28 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.5.2] — 2026-07-14
+
+### Fixed
+- **Einrichtungs-Assistent lief in einer Endlosschleife.** Nach dem Erteilen der
+  Berechtigungen startete die App neu, begann den Assistenten aber von vorn —
+  und die Häkchen schienen sich „von selbst auszuschalten". Drei Ursachen:
+  1. `CGPreflight*Access()` meldet bei ad-hoc signierten Apps (ohne bezahltes
+     Apple-Zertifikat) auch nach dem Setzen der Häkchen weiterhin `False` — der
+     Wert ist pro Prozess gecacht. Der Assistent wartete darum endlos. Jetzt
+     bricht er nach 45 s aus der Warteschleife aus und startet neu.
+  2. Der „schon eingerichtet"-Marker wurde erst ganz am Ende geschrieben. Der
+     Neustart-Schritt setzt ihn jetzt VOR dem Neustart — die frisch gestartete
+     Instanz weiß dadurch Bescheid und beginnt nicht von vorn.
+  3. Nach jedem DMG-Bau blieb eine zweite `LocalFlow.app` in `dist/` liegen.
+     macOS bindet diese Rechte an den DATEIPFAD, listete beide Kopien getrennt
+     auf — Häkchen bei der einen gesetzt, gestartet wurde die andere.
+     `build_dmg.sh` räumt die Build-Kopie jetzt selbst weg.
+
+### Added
+- 🩺 Diagnose → „Berechtigungen prüfen" zeigt jetzt den Pfad der laufenden App
+  und warnt explizit, wenn weitere LocalFlow-Kopien auf dem Mac gefunden werden.
+
 ## [0.5.1] — 2026-07-14
 
 ### Added

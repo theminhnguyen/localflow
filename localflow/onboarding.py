@@ -49,6 +49,56 @@ def onboarded_version() -> str:
         return ""
 
 
+# ---- Mehrfach-Installationen erkennen ----
+#
+# macOS bindet Bedienungshilfen-/Eingabemonitoring-Rechte bei ad-hoc signierten
+# Apps (ohne bezahltes Apple-Zertifikat) an den DATEIPFAD, nicht an die Bundle-ID.
+# Existiert LocalFlow.app mehrfach (z.B. /Applications UND dist/ aus dem Build),
+# taucht es MEHRFACH in den Systemeinstellungen auf und die erteilten Rechte
+# gelten nur für genau die Kopie, die dort freigegeben wurde. Klassische Falle:
+# Häkchen bei Kopie A gesetzt, gestartet wird aber Kopie B -> "Häkchen gehen aus".
+
+def running_app_path() -> str:
+    """Pfad des .app-Bundles, aus dem dieser Prozess läuft (oder Hinweis auf Dev-Modus)."""
+    import sys
+
+    if not getattr(sys, "frozen", False):
+        return "(Entwicklungsmodus, kein .app-Bundle)"
+    p = Path(sys.executable).resolve()
+    for parent in p.parents:
+        if parent.suffix == ".app":
+            return str(parent)
+    return str(p)
+
+
+def other_app_copies() -> list:
+    """Andere LocalFlow.app-Kopien auf dem System (außer der laufenden).
+
+    Nutzt Spotlight (mdfind) — findet auch Kopien in Downloads/Schreibtisch,
+    die der Nutzer beim Installieren vergessen hat.
+    """
+    import subprocess
+    import sys
+
+    if not getattr(sys, "frozen", False):
+        return []  # im Dev-Modus irrelevant
+    try:
+        out = subprocess.run(
+            ["mdfind", "kMDItemFSName == 'LocalFlow.app'"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    current = running_app_path()
+    found = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line and line != current and Path(line).exists():
+            found.append(line)
+    return found
+
+
 # ---- Schritt 3: Berechtigungen (Poll-Schleife) ----
 
 def permissions_step_action(initial_perms: dict, current_perms: dict) -> str:
@@ -71,6 +121,18 @@ def permissions_step_action(initial_perms: dict, current_perms: dict) -> str:
     if not both_now:
         return "wait"
     return "continue" if both_initially else "restart"
+
+
+# Nach so vielen Sekunden Warten auf die Berechtigungen geben wir dem Nutzer
+# die Möglichkeit, den Schritt zu überspringen, statt ewig zu blockieren.
+#
+# WARUM DAS NÖTIG IST: CGPreflightListenEventAccess()/CGPreflightPostEventAccess()
+# liefern bei ad-hoc signierten Apps (kein bezahltes Apple-Zertifikat) auch dann
+# noch False, wenn der Nutzer das Häkchen bereits gesetzt hat — der Wert wird pro
+# Prozess gecacht und aktualisiert sich frühestens nach einem Neustart. Ohne
+# Ausstieg pollt der Assistent hier also potenziell endlos ("wait"), der Nutzer
+# startet die App neu, der Marker wurde nie gesetzt -> Assistent beginnt von vorn.
+PERMISSION_WAIT_TIMEOUT_S = 45
 
 
 # ---- Schritt 3b: Neustart nach Berechtigungs-Erteilung ----

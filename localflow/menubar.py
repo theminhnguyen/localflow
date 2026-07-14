@@ -372,16 +372,36 @@ class MenubarApp(rumps.App):
         request_permissions()
         s = permissions_status()
         ok, no = "✅", "❌ fehlt"
-        rumps.alert(
-            title="LocalFlow — Berechtigungen",
-            message=(
-                f"Eingabemonitoring (Hotkey): {ok if s['input_monitoring'] else no}\n"
-                f"Bedienungshilfen (Einfügen): {ok if s['accessibility'] else no}\n\n"
-                "Falls etwas fehlt: Systemeinstellungen → Datenschutz & Sicherheit,\n"
-                "dort 'LocalFlow' bei beiden Punkten aktivieren\n"
-                "und LocalFlow neu starten."
-            ),
-        )
+
+        lines = [
+            f"Eingabemonitoring (Hotkey): {ok if s['input_monitoring'] else no}",
+            f"Bedienungshilfen (Einfügen): {ok if s['accessibility'] else no}",
+            "",
+            f"Diese App läuft aus:\n{onboarding.running_app_path()}",
+        ]
+
+        others = onboarding.other_app_copies()
+        if others:
+            lines += [
+                "",
+                "⚠️ ACHTUNG: Es gibt weitere LocalFlow-Kopien auf diesem Mac:",
+                *[f"  • {p}" for p in others],
+                "",
+                "macOS behandelt jede Kopie als EIGENE App — die Berechtigungen "
+                "gelten nur für die, die du dort freigegeben hast. Lösche die "
+                "überzähligen Kopien und starte nur die aus /Programme.",
+            ]
+        elif not (s["input_monitoring"] and s["accessibility"]):
+            lines += [
+                "",
+                "Fehlt etwas? Systemeinstellungen → Datenschutz & Sicherheit → "
+                "dort 'LocalFlow' aktivieren und LocalFlow neu starten.",
+                "",
+                "Hinweis: Stehen dort mehrere 'LocalFlow'-Einträge, entferne die "
+                "alten mit dem Minus-Knopf und aktiviere nur einen.",
+            ]
+
+        rumps.alert(title="LocalFlow — Berechtigungen", message="\n".join(lines))
 
     def _open_update(self, _):
         info = self.controller.update_available
@@ -463,6 +483,8 @@ class MenubarApp(rumps.App):
                      exc_info=True)
 
     def _onboarding_permissions_step(self):
+        import time
+
         from .hotkey import permissions_status, request_permissions
 
         if self._onb_initial_perms is None:
@@ -470,6 +492,7 @@ class MenubarApp(rumps.App):
             # danach nur noch still pollen (kein Dialog-Spam pro Tick).
             request_permissions()
             self._onb_initial_perms = dict(permissions_status())
+            self._onb_perm_wait_since = time.monotonic()
             subprocess.run(["open", "x-apple.systempreferences:com.apple.preference."
                                     "security?Privacy_ListenEvent"])
             subprocess.run(["open", "x-apple.systempreferences:com.apple.preference."
@@ -478,8 +501,10 @@ class MenubarApp(rumps.App):
                 title="Schritt 3 von 4 — Berechtigungen",
                 message=("Bitte aktiviere 'LocalFlow' in BEIDEN gerade geöffneten "
                          "Fenstern (Eingabemonitoring + Bedienungshilfen).\n\n"
-                         "LocalFlow wartet automatisch, bis beide gesetzt sind — "
-                         "du musst nichts weiter klicken."),
+                         "Wichtig: Aktiviere die App unter '/Programme' — falls dort "
+                         "mehrere 'LocalFlow'-Einträge stehen, entferne die alten "
+                         "mit dem Minus-Knopf.\n\n"
+                         "Danach geht es automatisch weiter."),
             )
             self.status_item.title = "⏳ Warte auf Berechtigungen…"
             return
@@ -487,15 +512,36 @@ class MenubarApp(rumps.App):
         current = permissions_status()
         action = onboarding.permissions_step_action(self._onb_initial_perms, current)
         if action == "wait":
+            # Ausweg aus der Warteschleife: CGPreflight* meldet bei ad-hoc
+            # signierten Apps auch nach dem Setzen der Häkchen weiterhin False
+            # (Wert ist pro Prozess gecacht). Ohne diesen Ausstieg würde der
+            # Assistent hier endlos hängen — genau der Bug, den der Nutzer sah.
+            waited = time.monotonic() - getattr(self, "_onb_perm_wait_since", 0)
+            if waited > onboarding.PERMISSION_WAIT_TIMEOUT_S:
+                self._onb_stage = onboarding.RESTART
             return
         self._onb_stage = onboarding.RESTART if action == "restart" else onboarding.MODEL
 
     def _onboarding_restart_step(self):
+        # Marker JETZT setzen, VOR dem Neustart: sonst sieht die frisch
+        # gestartete Instanz "nicht onboarded" und beginnt von vorn —
+        # eine Endlosschleife (Nutzer-Bug: "fängt immer wieder neu an").
+        # Nach dem Neustart übernimmt der normale Betrieb; fehlende
+        # Berechtigungen meldet die App dann über 🩺 Diagnose statt den
+        # Assistenten erneut zu starten.
+        try:
+            from . import __version__
+
+            onboarding.mark_onboarded(__version__)
+        except Exception:
+            log.exception("Onboarding-Marker konnte vor dem Neustart nicht gesetzt werden")
+
         rumps.alert(
-            title="Berechtigungen erteilt! 🎉",
-            message=("Damit die Diktier-Taste zuverlässig funktioniert, muss "
-                     "LocalFlow einmal neu starten.\n\nKlicke OK — das dauert "
-                     "nur eine Sekunde."),
+            title="Fast fertig — LocalFlow startet neu",
+            message=("LocalFlow startet jetzt einmal neu, damit die erteilten "
+                     "Berechtigungen greifen.\n\nFalls die Diktier-Taste danach "
+                     "nicht reagiert: 🩺 Diagnose → 'Berechtigungen prüfen' zeigt "
+                     "dir, was noch fehlt."),
         )
         try:
             onboarding.restart_app()  # ersetzt den Prozess -> kehrt bei Erfolg nie zurück
@@ -503,9 +549,8 @@ class MenubarApp(rumps.App):
             log.exception("Automatischer Neustart fehlgeschlagen")
             rumps.alert(
                 title="LocalFlow",
-                message=("Der automatische Neustart hat nicht geklappt. Bitte "
-                         "beende LocalFlow jetzt über 'Beenden' und öffne es "
-                         "danach erneut — die Einrichtung macht dann direkt weiter."),
+                message=("Bitte beende LocalFlow jetzt über 'Beenden' und öffne es "
+                         "danach erneut — die Einrichtung ist gespeichert."),
             )
             self.controller.shutdown()
             rumps.quit_application()

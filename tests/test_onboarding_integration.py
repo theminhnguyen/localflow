@@ -142,7 +142,9 @@ def test_onboarding_requires_restart_when_granted_mid_session(tmp_path, monkeypa
 
     app._tick(None)  # RESTART-Schritt: zeigt Alert, ruft restart_app() auf
     assert restart_calls == [1]
-    assert any("neu starten" in a["message"].lower() or "🎉" in a["title"] for a in alerts)
+    assert any("neu" in a["title"].lower() for a in alerts)  # "…startet neu"
+    # Und: der Marker MUSS vor dem Neustart gesetzt sein (sonst Endlosschleife)
+    assert onboarding.is_onboarded() is True
 
 
 def test_onboarding_restart_failure_falls_back_gracefully(tmp_path, monkeypatch):
@@ -184,3 +186,47 @@ def test_restart_onboarding_menu_action_resets_state(tmp_path, monkeypatch):
     assert app._onb_active is True
     assert app._onb_stage == onboarding.WELCOME
     assert onboarding.is_onboarded() is False
+
+
+# ---- Regression: Endlosschleife im Berechtigungs-Schritt (Nutzer-Bug 2026-07-14) ----
+
+def test_permission_step_times_out_instead_of_hanging_forever(tmp_path, monkeypatch):
+    """Der Kern-Bug: CGPreflight* meldet bei ad-hoc signierten Apps weiterhin
+    False, auch nachdem der Nutzer die Häkchen gesetzt hat. Ohne Ausstieg
+    pollte der Assistent endlos ('wait'), der Nutzer startete neu, der Marker
+    war nie gesetzt -> Assistent begann von vorn. Endlosschleife.
+    """
+    none_perms = {"input_monitoring": False, "accessibility": False}
+    app, ctrl, alerts, opens = make_app(tmp_path, monkeypatch, none_perms)
+
+    app._tick(None)  # WELCOME
+    app._tick(None)  # MICROPHONE -> PERMISSIONS
+    app._tick(None)  # PERMISSIONS: initial_perms gesetzt, Fenster geöffnet
+    assert app._onb_stage == onboarding.PERMISSIONS
+
+    # Berechtigungen bleiben (aus Sicht der API) dauerhaft False
+    app._tick(None)
+    assert app._onb_stage == onboarding.PERMISSIONS  # wartet noch
+
+    # Zeit vorspulen: Wartezeit überschritten
+    app._onb_perm_wait_since -= (onboarding.PERMISSION_WAIT_TIMEOUT_S + 1)
+    app._tick(None)
+    assert app._onb_stage == onboarding.RESTART  # bricht aus der Schleife aus
+
+
+def test_marker_written_before_restart_prevents_loop(tmp_path, monkeypatch):
+    """Zweiter Teil des Bugs: der Marker wurde erst am ENDE gesetzt. Nach dem
+    execv-Neustart sah die neue Instanz 'nicht onboarded' und fing von vorn an.
+    Jetzt wird er VOR dem Neustart geschrieben.
+    """
+    both = {"input_monitoring": True, "accessibility": True}
+    app, ctrl, alerts, opens = make_app(tmp_path, monkeypatch, both)
+    app._onb_stage = onboarding.RESTART
+
+    restarts = []
+    monkeypatch.setattr(onboarding, "restart_app", lambda: restarts.append(1))
+
+    assert onboarding.is_onboarded() is False
+    app._tick(None)
+    assert onboarding.is_onboarded() is True   # VOR dem Neustart gesetzt!
+    assert restarts == [1]
