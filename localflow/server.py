@@ -16,14 +16,31 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from . import config
+from . import autostart, config
 from .cleanup import clean
+from .engine import MODELS
 
 log = logging.getLogger("localflow.server")
 
 WEB_DIR = Path(__file__).parent / "web"
 CERT_DIR = config.CONFIG_DIR / "certs"
 _START_TIME = time.time()
+
+# Whitelist für GET/PUT /api/config — bewusst nur die Werte, die eine
+# Einstellungs-Seite braucht (kein Token, keine internen Feineinstellungen
+# wie silence_rms/llm_timeout). "choices" = Enum, "bool" = Wahrheitswert.
+CONFIG_SCHEMA = {
+    "language": {"choices": ("auto", "de", "en")},
+    "hotkey": {"choices": ("alt_r", "cmd_r", "ctrl_r", "f13")},
+    "model": {"choices": tuple(MODELS.keys())},
+    "llm_enabled": {"bool": True},
+    "llm_smart": {"bool": True},
+    "phone_insert": {"bool": True},
+    "share_history": {"bool": True},
+    "sounds": {"bool": True},
+    "update_check": {"bool": True},
+    "log_texts": {"bool": True},
+}
 
 
 def lan_ip() -> str:
@@ -143,6 +160,10 @@ def create_app(engine, get_language, controller=None) -> Flask:
     def index():
         return send_from_directory(WEB_DIR, "index.html")
 
+    @app.get("/settings")
+    def settings_page():
+        return send_from_directory(WEB_DIR, "settings.html")
+
     @app.get("/<path:name>")
     def static_file(name):
         return send_from_directory(WEB_DIR, name)
@@ -185,6 +206,48 @@ def create_app(engine, get_language, controller=None) -> Flask:
             body["stats"] = dict(controller.stats)
             body["state"] = controller.state
         return jsonify(**body)
+
+    @app.get("/api/config")
+    def get_config():
+        c = cfg()
+        body = {k: c.get(k) for k in CONFIG_SCHEMA}
+        body["autostart"] = autostart.enabled()
+        return jsonify(**body)
+
+    @app.put("/api/config")
+    def put_config():
+        if controller is None:
+            return jsonify(error="im --serve-only-Modus nicht verfügbar"), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(error="ungültiger Body (JSON-Objekt erwartet)"), 400
+        unknown = [k for k in data if k not in CONFIG_SCHEMA and k != "autostart"]
+        if unknown:
+            return jsonify(error=f"unbekannte Schlüssel: {', '.join(unknown)}"), 400
+
+        applied = {}
+        for key, value in data.items():
+            if key == "autostart":
+                if not isinstance(value, bool):
+                    return jsonify(error="autostart: muss ein Wahrheitswert sein"), 400
+                applied["autostart"] = controller.set_autostart(value)
+                continue
+            rule = CONFIG_SCHEMA[key]
+            if "choices" in rule and value not in rule["choices"]:
+                return jsonify(error=f"{key}: ungültiger Wert {value!r}"), 400
+            if rule.get("bool") and not isinstance(value, bool):
+                return jsonify(error=f"{key}: muss ein Wahrheitswert sein"), 400
+            # Über die vorhandenen Setter anwenden -> greift sofort, kein Neustart nötig
+            if key == "language":
+                controller.set_language(value)
+            elif key == "hotkey":
+                controller.set_hotkey(value)
+            elif key == "model":
+                controller.set_model(value)
+            else:
+                controller.set_toggle(key, value)
+            applied[key] = value
+        return jsonify(ok=True, applied=applied)
 
     @app.post("/api/transcribe")
     def transcribe():

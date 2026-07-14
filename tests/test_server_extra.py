@@ -34,6 +34,7 @@ class FakeController:
         self.stats = {"count": 0, "audio_s": 0.0, "engine_ms": 0, "llm_used": 0}
         self.state = "idle"
         self.noted = []
+        self.calls = []
 
     def effective_language(self):
         lang = self.cfg.get("language", "auto")
@@ -41,6 +42,26 @@ class FakeController:
 
     def note_detected_language(self, language, text):
         self.noted.append((language, bool(text)))
+
+    def set_language(self, code):
+        self.cfg["language"] = code
+        self.calls.append(("set_language", code))
+
+    def set_hotkey(self, code):
+        self.cfg["hotkey"] = code
+        self.calls.append(("set_hotkey", code))
+
+    def set_model(self, code):
+        self.cfg["model"] = code
+        self.calls.append(("set_model", code))
+
+    def set_toggle(self, key, value):
+        self.cfg[key] = value
+        self.calls.append(("set_toggle", key, value))
+
+    def set_autostart(self, value):
+        self.calls.append(("set_autostart", value))
+        return value  # simuliert erfolgreich erreichten Zustand
 
 
 def wav_bytes(seconds=1.0, amplitude=0.1):
@@ -221,3 +242,99 @@ def test_auth_token_survives_reset_of_wrong_guess(auth_client, monkeypatch):
     fresh = c.post("/api/transcribe", headers={"X-LocalFlow-Key": new_token},
                    data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
     assert fresh.status_code == 200
+
+
+# ---- /api/config (Web-Einstellungsseite) ----
+
+def test_get_config_returns_whitelisted_fields_only(client):
+    c, ctrl = client
+    j = c.get("/api/config").get_json()
+    assert set(j.keys()) == set(server_mod.CONFIG_SCHEMA.keys()) | {"autostart"}
+    assert "require_auth" not in j  # interna/Sicherheitsschalter NICHT exponiert
+    assert "server_port" not in j
+
+
+def test_get_config_reflects_current_values(client):
+    c, ctrl = client
+    ctrl.cfg["language"] = "de"
+    ctrl.cfg["llm_enabled"] = True
+    j = c.get("/api/config").get_json()
+    assert j["language"] == "de"
+    assert j["llm_enabled"] is True
+
+
+def test_put_config_language_calls_setter(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"language": "en"})
+    assert r.status_code == 200
+    assert r.get_json()["applied"] == {"language": "en"}
+    assert ("set_language", "en") in ctrl.calls
+
+
+def test_put_config_bool_calls_set_toggle(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"llm_smart": False})
+    assert r.status_code == 200
+    assert ("set_toggle", "llm_smart", False) in ctrl.calls
+
+
+def test_put_config_hotkey_and_model(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"hotkey": "cmd_r", "model": "small"})
+    assert r.status_code == 200
+    assert ("set_hotkey", "cmd_r") in ctrl.calls
+    assert ("set_model", "small") in ctrl.calls
+
+
+def test_put_config_autostart_special_cased(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"autostart": True})
+    assert r.status_code == 200
+    assert r.get_json()["applied"] == {"autostart": True}
+    assert ("set_autostart", True) in ctrl.calls
+
+
+def test_put_config_rejects_invalid_choice(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"language": "fr"})
+    assert r.status_code == 400
+    assert ctrl.calls == []
+
+
+def test_put_config_rejects_wrong_type(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"llm_enabled": "ja klar"})
+    assert r.status_code == 400
+    assert ctrl.calls == []
+
+
+def test_put_config_rejects_unknown_key(client):
+    c, ctrl = client
+    r = c.put("/api/config", json={"require_auth": False})
+    assert r.status_code == 400
+    assert ctrl.calls == []
+
+
+def test_put_config_rejects_non_object_body(client):
+    c, ctrl = client
+    r = c.put("/api/config", json=["nicht", "ein", "objekt"])
+    assert r.status_code == 400
+
+
+def test_put_config_without_controller_is_400(monkeypatch):
+    # Ohne Controller fällt cfg() auf config.load_config() zurück (echte Datei);
+    # require_auth hier explizit aus, damit der Auth-Guard nicht vor unserem
+    # eigentlichen Test-Fall (--serve-only-Limitierung) zuschlägt.
+    monkeypatch.setattr(config, "load_config", lambda: {"require_auth": False})
+    app = create_app(FakeEngine(), lambda: "de", controller=None)
+    app.config["TESTING"] = True
+    c = app.test_client()
+    r = c.put("/api/config", json={"language": "de"})
+    assert r.status_code == 400
+
+
+def test_settings_page_served(client):
+    c, ctrl = client
+    r = c.get("/settings")
+    assert r.status_code == 200
+    assert b"LocalFlow" in r.data

@@ -164,6 +164,15 @@ class FlowController:
         self.engine = Engine(short)
         self.engine.warmup_async()
 
+    def set_autostart(self, value: bool) -> bool:
+        """Autostart ist kein config.json-Schlüssel, sondern ein LaunchAgent-
+        Dateizustand (siehe autostart.py). Liefert den tatsächlich erreichten
+        Zustand zurück (enable()/disable() können z.B. an Dateirechten scheitern)."""
+        from . import autostart
+
+        autostart.enable() if value else autostart.disable()
+        return autostart.enabled()
+
     # ---- Diktat-Ablauf (Hotkey-Callbacks: schnell & ausnahmesicher) ----
 
     def on_press(self) -> None:

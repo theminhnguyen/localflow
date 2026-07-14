@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1117">
+<title>LocalFlow — Einstellungen</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1e2a; --text: #eef1f7; --muted: #8b93a7;
+    --accent: #5b8cff; --rec: #ff5b6e; --ok: #3ecf8e; --border: #2a3040;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: max(env(safe-area-inset-top), 20px) 16px 40px;
+    max-width: 640px; margin: 0 auto;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 20px; }
+  header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  header h1 span { color: var(--accent); }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--rec); }
+
+  .group { background: var(--card); border-radius: 14px; padding: 6px 16px; margin-bottom: 16px; }
+  .group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); font-weight: 600; padding: 14px 0 6px; }
+  .row { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-top: 1px solid var(--border); gap: 12px; }
+  .group h2 + .row { border-top: none; }
+  .row-label { font-size: 15px; }
+  .row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* Umschalter */
+  .switch { position: relative; width: 46px; height: 27px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch .track { position: absolute; inset: 0; background: #3a4157; border-radius: 999px;
+    transition: background .15s; pointer-events: none; }
+  .switch .knob { position: absolute; top: 2px; left: 2px; width: 23px; height: 23px;
+    background: #fff; border-radius: 50%; transition: transform .15s; pointer-events: none; }
+  .switch input:checked ~ .track { background: var(--ok); }
+  .switch input:checked ~ .knob { transform: translateX(19px); }
+
+  /* Chip-Auswahl (Sprache/Taste/Modell) */
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 14px; }
+  .chip { background: #10131c; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .chip.sel { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+
+  .info { font-size: 12px; color: var(--muted); padding: 4px 0 14px; line-height: 1.5; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px);
+    transform: translateX(-50%); background: var(--ok); color: #04281a; font-weight: 700;
+    font-size: 14px; padding: 10px 18px; border-radius: 999px; opacity: 0;
+    transition: opacity .25s; pointer-events: none; z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .toast.err { background: var(--rec); color: #2a0508; }
+  .locked { text-align: center; color: var(--muted); padding: 60px 20px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local<span>Flow</span> · Einstellungen</h1>
+  <div class="status"><div class="dot" id="dot"></div><span id="statusText">verbinde…</span></div>
+</header>
+
+<div id="app" hidden>
+  <div class="group">
+    <h2>Diktat</h2>
+    <div class="row"><div><div class="row-label">Sprache</div></div></div>
+    <div class="chips" id="chip-language"></div>
+    <div class="row"><div><div class="row-label">Diktier-Taste</div></div></div>
+    <div class="chips" id="chip-hotkey"></div>
+    <div class="row"><div><div class="row-label">Whisper-Modell</div></div></div>
+    <div class="chips" id="chip-model"></div>
+  </div>
+
+  <div class="group">
+    <h2>KI-Feinschliff</h2>
+    <div class="row">
+      <div><div class="row-label">Aktiv</div><div class="row-sub" id="llm-status">—</div></div>
+      <label class="switch"><input type="checkbox" data-key="llm_enabled" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="row">
+      <div><div class="row-label">🚀 Schnell-Modus</div><div class="row-sub">KI nur bei Bedarf (Korrekturen, lange Diktate)</div></div>
+      <label class="switch"><input type="checkbox" data-key="llm_smart" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Handy</h2>
+    <div class="row">
+      <div><div class="row-label">Darf am Mac einfügen</div><div class="row-sub">Fernmikrofon-Funktion („→ Mac")</div></div>
+      <label class="switch"><input type="checkbox" data-key="phone_insert" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="row">
+      <div><div class="row-label">Verlauf teilen</div><div class="row-sub">Handy sieht den Mac-Diktatverlauf</div></div>
+      <label class="switch"><input type="checkbox" data-key="share_history" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>System</h2>
+    <div class="row">
+      <div><div class="row-label">🔊 Töne</div></div>
+      <label class="switch"><input type="checkbox" data-key="sounds" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="row">
+      <div><div class="row-label">🚀 Beim Anmelden starten</div></div>
+      <label class="switch"><input type="checkbox" data-key="autostart" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="row">
+      <div><div class="row-label">🔄 Auf Updates prüfen</div><div class="row-sub">Still, täglich, kein Auto-Download</div></div>
+      <label class="switch"><input type="checkbox" data-key="update_check" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="row">
+      <div><div class="row-label">📝 Diktattexte ins Log schreiben</div><div class="row-sub">Nur zum Debuggen — standardmäßig aus</div></div>
+      <label class="switch"><input type="checkbox" data-key="log_texts" data-kind="bool">
+        <span class="track"></span><span class="knob"></span></label>
+    </div>
+  </div>
+
+  <p class="info">Änderungen wirken sofort — kein Neustart nötig.</p>
+</div>
+
+<div id="locked" class="locked" hidden>
+  🔑 Nicht gekoppelt.<br>Scanne den QR-Code am Mac erneut
+  (Menüleiste → 📱 Handy koppeln).
+</div>
+
+<div class="toast" id="toast">Gespeichert ✓</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ---- Kopplung: Token aus dem Link übernehmen (gleiche Logik wie index.html) ----
+(function importKeyFromHash() {
+  const m = location.hash.match(/[#&]k=([^&]+)/);
+  if (m) {
+    localStorage.setItem("lf_key", decodeURIComponent(m[1]));
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+})();
+function authHeaders(extra) {
+  const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
+  const key = localStorage.getItem("lf_key");
+  if (key) h["X-LocalFlow-Key"] = key;
+  return h;
+}
+
+const CHIPS = {
+  language: [["Automatisch", "auto"], ["Deutsch", "de"], ["Englisch", "en"]],
+  hotkey: [["Rechte ⌥", "alt_r"], ["Rechte ⌘", "cmd_r"], ["Rechte ⌃", "ctrl_r"], ["F13", "f13"]],
+  model: [["Standard (schnell)", "turbo-q4"], ["Maximal präzise", "turbo"], ["Klein & flott", "small"]],
+};
+
+let cfg = {};
+
+function showToast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("err", !!isErr); t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1600);
+}
+
+async function save(key, value) {
+  try {
+    const r = await fetch("/api/config", { method: "PUT", headers: authHeaders(),
+      body: JSON.stringify({ [key]: value }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Fehler beim Speichern");
+    showToast("Gespeichert ✓");
+    return true;
+  } catch (e) {
+    showToast(e.message, true);
+    return false;
+  }
+}
+
+function renderChips(groupKey) {
+  const el = $("chip-" + groupKey);
+  el.innerHTML = "";
+  CHIPS[groupKey].forEach(([label, value]) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (cfg[groupKey] === value ? " sel" : "");
+    b.textContent = label;
+    b.onclick = async () => {
+      const prev = cfg[groupKey];
+      cfg[groupKey] = value;
+      renderChips(groupKey);
+      const ok = await save(groupKey, value);
+      if (!ok) { cfg[groupKey] = prev; renderChips(groupKey); }
+    };
+    el.appendChild(b);
+  });
+}
+
+function renderToggles() {
+  document.querySelectorAll('input[data-kind="bool"]').forEach(input => {
+    const key = input.dataset.key;
+    input.checked = !!cfg[key];
+    input.onchange = async () => {
+      const value = input.checked;
+      const ok = await save(key, value);
+      if (!ok) input.checked = !value;
+      else if (key === "autostart") input.checked = value; // Server meldet erreichten Zustand
+    };
+  });
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch("/api/status", { headers: authHeaders() });
+    const j = await r.json();
+    $("llm-status").textContent = j.llm?.available
+      ? `${j.llm.backend} · ${j.llm.model}`
+      : (j.llm?.enabled ? "kein LLM erreichbar" : "aus");
+  } catch {}
+}
+
+async function ping() {
+  try {
+    const r = await fetch("/api/ping");
+    $("dot").className = "dot on";
+    $("statusText").textContent = "verbunden";
+  } catch { $("dot").className = "dot off"; $("statusText").textContent = "Mac nicht erreichbar"; }
+}
+
+async function init() {
+  await ping();
+  try {
+    const r = await fetch("/api/config", { headers: authHeaders() });
+    if (r.status === 401) { $("locked").hidden = false; return; }
+    cfg = await r.json();
+    if (!r.ok) throw new Error("Laden fehlgeschlagen");
+    $("app").hidden = false;
+    renderChips("language"); renderChips("hotkey"); renderChips("model");
+    renderToggles();
+    loadStatus();
+  } catch (e) {
+    $("locked").hidden = false;
+    $("locked").textContent = "Fehler beim Laden: " + e.message;
+  }
+}
+init();
+setInterval(ping, 8000);
+</script>
+</body>
+</html>

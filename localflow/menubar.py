@@ -123,6 +123,9 @@ class MenubarApp(rumps.App):
             lang_menu.add(item)
 
         settings = rumps.MenuItem("⚙️ Einstellungen")
+        settings.add(rumps.MenuItem("Einstellungen im Browser öffnen…",
+                                    callback=self._open_settings_page))
+        settings.add(None)
         for title, key in TOGGLES:
             item = rumps.MenuItem(title, callback=self._make_toggle_cb(key))
             item.state = 1 if cfg.get(key) else 0
@@ -294,15 +297,20 @@ class MenubarApp(rumps.App):
         if entries:
             subprocess.run(["pbcopy"], input=entries[0]["text"].encode("utf-8"))
 
-    def _url(self, ip=None):
+    def _url(self, ip=None, path=""):
         port = self.controller.cfg.get("server_port", 8790)
         token = config.load_or_create_token()
         # Token als URL-Fragment ("#k="): Fragmente werden vom Browser NIE mitgesendet
         # (auch nicht an den eigenen Server) und tauchen darum in keinem Zugriffs-Log auf.
-        return f"https://{ip or lan_ip()}:{port}/#k={token}"
+        return f"https://{ip or lan_ip()}:{port}/{path}#k={token}"
 
     def _copy_link(self, _):
         subprocess.run(["pbcopy"], input=self._url().encode())
+
+    def _open_settings_page(self, _):
+        # 127.0.0.1 statt LAN-IP: wir öffnen sie vom Mac selbst aus, und das
+        # Zertifikat deckt 127.0.0.1 immer ab (siehe server.ensure_cert()).
+        subprocess.run(["open", self._url(ip="127.0.0.1", path="settings")])
 
     def _show_qr(self, _):
         self._render_qr(self._url(), "handy-qr.png")
