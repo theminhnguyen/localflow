@@ -32,6 +32,7 @@ TOGGLES = [
     ("🕘 Verlauf fürs Handy freigeben", "share_history"),
     ("🔊 Töne", "sounds"),
     ("📝 Diktattexte ins Log schreiben (Debug)", "log_texts"),
+    ("🔄 Auf Updates prüfen", "update_check"),
 ]
 
 
@@ -71,12 +72,26 @@ class MenubarApp(rumps.App):
             except Exception:
                 log.warning("Hinweis: %s", msg)
 
+        if c.update_available and self.update_item.hidden:
+            self.update_item.title = f"⬆️ Update {c.update_available['tag']} verfügbar…"
+            self.update_item.hidden = False
+
+        if c.update_check_message:
+            msg, c.update_check_message = c.update_check_message, ""
+            rumps.alert(title="LocalFlow — Update-Check", message=msg)
+
     # ---- Menü ----
 
     def _build_menu(self):
         cfg = self.controller.cfg
         self.status_item = rumps.MenuItem("Modell lädt… (erster Start: Download)")
         self.status_item.set_callback(None)
+
+        # Dauerhaft im Menü, aber unsichtbar bis eine neuere Version gefunden
+        # wird (.hidden statt Ein-/Ausbauen — vermeidet Anker-Key-Fallstricke
+        # bei rumps, siehe insert_before/after-Doku).
+        self.update_item = rumps.MenuItem("⬆️ Update verfügbar…", callback=self._open_update)
+        self.update_item.hidden = True
 
         lang_menu = rumps.MenuItem("Sprache")
         for label, code in LANGS:
@@ -125,9 +140,11 @@ class MenubarApp(rumps.App):
         diagnose.add(rumps.MenuItem("Log-Datei öffnen", callback=self._open_log))
         diagnose.add(rumps.MenuItem("Log leeren", callback=self._clear_logs))
         diagnose.add(rumps.MenuItem("Berechtigungen prüfen", callback=self._check_perms))
+        diagnose.add(rumps.MenuItem("Jetzt nach Updates suchen", callback=self._check_updates_now))
 
         self.menu = [
             self.status_item,
+            self.update_item,
             None,
             rumps.MenuItem("Audiodatei transkribieren…", callback=self._transcribe_file),
             lang_menu,
@@ -334,6 +351,19 @@ class MenubarApp(rumps.App):
                 "und LocalFlow neu starten."
             ),
         )
+
+    def _open_update(self, _):
+        info = self.controller.update_available
+        if info:
+            subprocess.run(["open", info["url"]])
+
+    def _check_updates_now(self, _):
+        # Netzwerk-Aufruf im Hintergrund; das Ergebnis holt sich der nächste
+        # Menü-Tick über controller.update_check_message (Haupt-Thread-Regel).
+        threading.Thread(
+            target=lambda: self.controller.check_for_update_now(manual=True),
+            daemon=True,
+        ).start()
 
     def _quit(self, _):
         self.controller.shutdown()

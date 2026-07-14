@@ -28,6 +28,7 @@ kein Abo, kein Konto.
 | Audiodateien transkribieren | ✅ Sprachmemo/Meeting → Textdatei |
 | Unterwegs diktieren | ✅ automatisch, wenn Tailscale installiert ist |
 | Autostart beim Anmelden | ✅ abschaltbar |
+| Update-Check | ✅ still, täglich, kein Auto-Download — abschaltbar |
 | Diagnose & Log | ✅ Menü „🩺 Diagnose" |
 | Kosten / Internet | **0 € / offline** (Wispr Flow: 15 $/Monat + Cloud) |
 

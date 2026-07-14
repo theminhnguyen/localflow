@@ -70,6 +70,12 @@ class FlowController:
         self._lang_cache = None
         self._lang_count = 0
         self._warned_loading = False  # "Modell lädt noch"-Hinweis nur einmal
+        # Update-Check: update_available bleibt gesetzt, sobald eine neuere
+        # Version gefunden wurde (zeigt den Menüpunkt dauerhaft an).
+        # update_check_message ist eine einmalige Meldung für den nächsten
+        # Menü-Tick (nur beim manuellen "Jetzt nach Updates suchen").
+        self.update_available = None
+        self.update_check_message = ""
 
     # ---- Zustand für die Menüleiste ----
 
@@ -99,6 +105,8 @@ class FlowController:
                          name="localflow-worker").start()
         threading.Thread(target=self._watchdog_loop, daemon=True,
                          name="localflow-watchdog").start()
+        threading.Thread(target=self._update_check_loop, daemon=True,
+                         name="localflow-updater").start()
 
     def shutdown(self) -> None:
         self._stop = True
@@ -255,6 +263,35 @@ class FlowController:
                 self._watchdog_step()
             except Exception:
                 log.exception("Wächter-Fehler")
+
+    # ---- Update-Check (still im Hintergrund, nie blockierend) ----
+
+    def _update_check_loop(self) -> None:
+        time.sleep(60)  # App-Start bleibt schlank; Netzwerk erst danach anfassen
+        while not self._stop:
+            self.check_for_update_now()
+            time.sleep(24 * 3600)
+
+    def check_for_update_now(self, manual: bool = False) -> None:
+        """Prüft gegen GitHub. manual=True (Menü-Aktion) meldet auch 'kein
+        Update' zurück; der automatische 24h-Loop bleibt sonst still."""
+        if not manual and not self.cfg.get("update_check", True):
+            return
+        from . import __version__, updater
+
+        try:
+            found = updater.check_for_update(__version__)
+        except Exception:
+            log.debug("Update-Check fehlgeschlagen", exc_info=True)
+            found = None
+        if found:
+            self.update_available = found
+            log.info("Update verfügbar: %s", found["tag"])
+        if manual:
+            self.update_check_message = (
+                f"Update verfügbar: {found['tag']}\n{found['url']}" if found
+                else "Du nutzt bereits die neueste Version."
+            )
 
     # ---- Verarbeitung (ein Worker, hält die Reihenfolge ein) ----
 

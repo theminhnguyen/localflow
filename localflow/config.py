@@ -68,6 +68,10 @@ DEFAULT_CONFIG = {
     # Wie viele Verlaufs-Einträge behalten werden (Menü "Verlauf"/PWA). 0 = kein
     # Verlauf speichern.
     "history_keep": 50,
+    # Einmal täglich still gegen die öffentliche GitHub-Releases-API prüfen, ob
+    # eine neuere Version da ist (kein Auto-Download, nur ein Menü-Hinweis).
+    # Der einzige "Telefon-nach-Hause"-Aufruf der App — daher abschaltbar.
+    "update_check": True,
 }
 
 DEFAULT_DICTIONARY = {

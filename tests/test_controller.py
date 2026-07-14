@@ -249,3 +249,62 @@ def test_history_keep_zero_stores_nothing(tmp_path, monkeypatch):
     press_hold_release(c)
     assert wait_idle(c)
     assert _cfg.load_history() == []
+
+
+# ---- Update-Check ----
+
+def test_update_check_sets_update_available(monkeypatch):
+    import localflow.updater as _updater
+
+    monkeypatch.setattr(_updater, "check_for_update",
+                        lambda *a, **k: {"tag": "v9.9.9", "url": "https://x"})
+    c = make_controller(update_check=True)
+    c.check_for_update_now()
+    assert c.update_available == {"tag": "v9.9.9", "url": "https://x"}
+    assert c.update_check_message == ""  # automatischer Check bleibt still
+
+
+def test_update_check_disabled_skips_automatic(monkeypatch):
+    import localflow.updater as _updater
+
+    called = []
+    monkeypatch.setattr(_updater, "check_for_update",
+                        lambda *a, **k: called.append(1) or None)
+    c = make_controller(update_check=False)
+    c.check_for_update_now()
+    assert called == []
+    assert c.update_available is None
+
+
+def test_update_check_manual_ignores_disabled_flag(monkeypatch):
+    import localflow.updater as _updater
+
+    monkeypatch.setattr(_updater, "check_for_update",
+                        lambda *a, **k: {"tag": "v9.9.9", "url": "https://x"})
+    c = make_controller(update_check=False)
+    c.check_for_update_now(manual=True)
+    assert c.update_available == {"tag": "v9.9.9", "url": "https://x"}
+    assert "v9.9.9" in c.update_check_message
+
+
+def test_update_check_manual_reports_no_update(monkeypatch):
+    import localflow.updater as _updater
+
+    monkeypatch.setattr(_updater, "check_for_update", lambda *a, **k: None)
+    c = make_controller()
+    c.check_for_update_now(manual=True)
+    assert c.update_available is None
+    assert "neueste Version" in c.update_check_message
+
+
+def test_update_check_network_error_is_swallowed(monkeypatch):
+    import localflow.updater as _updater
+
+    def raise_err(*a, **k):
+        raise OSError("kein Netz")
+
+    monkeypatch.setattr(_updater, "check_for_update", raise_err)
+    c = make_controller()
+    c.check_for_update_now(manual=True)  # darf NICHT werfen
+    assert c.update_available is None
+    assert "neueste Version" in c.update_check_message
