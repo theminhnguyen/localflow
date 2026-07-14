@@ -170,8 +170,11 @@ def create_app(engine, get_language, controller=None) -> Flask:
     def status():
         from . import llm
 
+        from . import __version__
+
         c = cfg()
         body = {
+            "version": __version__,
             "model": engine.repo, "loaded": engine.loaded,
             "uptime_s": int(time.time() - _START_TIME),
             "llm": {"enabled": bool(c.get("llm_enabled")), **llm.status(c)},

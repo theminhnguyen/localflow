@@ -5,7 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 VENV=".venv/bin"
-VERSION="0.3.0"
+# Zentrale Versionsquelle: localflow/__init__.py (NICHT hier hardcoden)
+VERSION="$("$VENV/python" -c 'from localflow import __version__; print(__version__)')"
 APP="dist/LocalFlow.app"
 DMG="dist/LocalFlow-${VERSION}.dmg"
 

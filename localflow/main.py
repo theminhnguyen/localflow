@@ -344,7 +344,7 @@ class FlowController:
     # ---- Diagnose ----
 
     def status_report(self) -> str:
-        from . import llm
+        from . import __version__, llm
         from .hotkey import permissions_status
         from .server import lan_ip
 
@@ -354,6 +354,7 @@ class FlowController:
         s = self.stats
         avg = (s["engine_ms"] // s["count"]) if s["count"] else 0
         lines = [
+            f"LocalFlow v{__version__}",
             f"Läuft seit: {uptime // 3600}h {(uptime % 3600) // 60}min",
             f"Modell: {self.engine.repo} ({'geladen' if self.engine.loaded else 'lädt…'})",
             f"Diktate: {s['count']}  ·  Audio: {s['audio_s']:.0f}s  ·  Ø Engine: {avg}ms",

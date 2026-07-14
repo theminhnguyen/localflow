@@ -137,6 +137,7 @@ def test_status_endpoint(client):
     c, ctrl = client
     j = c.get("/api/status").get_json()
     assert j["model"] == "fake-model" and "llm" in j and j["state"] == "idle"
+    assert "version" in j and j["version"]
 
 
 def test_missing_audio_is_400(client):

@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    # arm64 nötig: mlx (Apple-Silicon-GPU) läuft nicht auf Intel/Linux-Runnern.
+    # Kostenlos für öffentliche Repos.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Schnelle Tests (ohne Whisper-Modell-Download)
+        run: python -m pytest tests/ -q --ignore=tests/test_e2e.py

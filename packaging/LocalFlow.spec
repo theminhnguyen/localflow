@@ -3,13 +3,14 @@
 # (vom Repo-Wurzelverzeichnis aus, damit "localflow" importierbar ist)
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-__version__ = "0.3.0"
-
 # Alle Pfade absolut, relativ zur Repo-Wurzel (SPECPATH = Ordner dieser .spec)
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
+sys.path.insert(0, ROOT)
+from localflow import __version__  # zentrale Versionsquelle (localflow/__init__.py)
 
 datas, binaries, hiddenimports = [], [], []
 

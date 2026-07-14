@@ -57,3 +57,11 @@ def test_clear_history(tmp_path, monkeypatch):
     assert len(config.load_history()) == 1
     config.clear_history()
     assert config.load_history() == []
+
+
+def test_version_is_semver_like():
+    import re
+
+    from localflow import __version__
+
+    assert re.match(r"^\d+\.\d+\.\d+$", __version__), __version__

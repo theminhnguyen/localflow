@@ -1,5 +1,9 @@
 # LocalFlow 🎙️
 
+[![CI](https://github.com/theminhnguyen/localflow/actions/workflows/ci.yml/badge.svg)](https://github.com/theminhnguyen/localflow/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/theminhnguyen/localflow?label=release)](https://github.com/theminhnguyen/localflow/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Diktier-App wie [Wispr Flow](https://wisprflow.ai) — aber 100 % lokal, kostenlos und offline.**
 Deine Stimme wird direkt auf deinem Mac zu Text (Whisper), nichts geht ins Internet,
 kein Abo, kein Konto.
