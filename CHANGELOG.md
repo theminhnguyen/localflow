@@ -6,7 +6,7 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
-## [Unreleased]
+## [0.5.0] — 2026-07-14
 
 ### Added
 - Einrichtungs-Assistent beim allerersten Start (Mikrofon, Berechtigungen inkl.
