@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.5.1] — 2026-07-14
+
+### Added
+- Gestaltetes DMG-Hintergrundbild (Wortmarke, Pfeil zum Programme-Ordner) —
+  vorher ein leeres Finder-Fenster, jetzt ein geführtes Installations-Layout
+  im LocalFlow-Design. Erzeugt von `scripts/make_dmg_background.py`,
+  automatisch per Finder-AppleScript in `packaging/build_dmg.sh` platziert.
+
 ## [0.5.0] — 2026-07-14
 
 ### Added

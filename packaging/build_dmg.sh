@@ -40,19 +40,75 @@ ln -s /Applications "$STAGE/Applications"       # Ziel für Drag-and-drop
 cat > "$STAGE/ANLEITUNG.txt" <<'TXT'
 LocalFlow installieren:
 
-1. LocalFlow-Symbol auf den "Programme"-Ordner (rechts) ziehen.
+1. LocalFlow-Symbol auf den "Programme"-Ordner ziehen.
 2. In "Programme" LocalFlow per RECHTSKLICK -> "Öffnen" starten
    (nur beim allerersten Mal; danach normal per Doppelklick/Spotlight).
-3. macOS fragt nach Mikrofon, Bedienungshilfen und Eingabemonitoring
-   -> alle erlauben und LocalFlow einmal neu starten.
+3. Ein Assistent führt durch Mikrofon, Berechtigungen und den
+   einmaligen Modell-Download.
 
 Diktieren: rechte Wahltaste (Option) halten, sprechen, loslassen.
 TXT
 
+# Hintergrundbild (unsichtbarer Ordner, wie bei DMGs üblich)
+BG_SRC="packaging/dmg_background.png"
+HAVE_BG=0
+if [ -f "$BG_SRC" ]; then
+  mkdir -p "$STAGE/.background"
+  cp "$BG_SRC" "$STAGE/.background/background.png"
+  HAVE_BG=1
+fi
+
 echo "▸ 4/4  DMG erstellen…"
 rm -f "$DMG"
-hdiutil create -volname "LocalFlow" -srcfolder "$STAGE" \
-  -ov -format UDZO "$DMG" >/dev/null
+
+if [ "$HAVE_BG" = "1" ] && [ "$(uname)" = "Darwin" ]; then
+  # Zwischen-DMG beschreibbar erzeugen, damit Finder Icon-Layout/Hintergrund
+  # setzen kann; danach komprimiert & schreibgeschützt final konvertieren.
+  RW_DMG="$(mktemp -u).dmg"
+  hdiutil create -volname "LocalFlow" -srcfolder "$STAGE" \
+    -fs HFS+ -format UDRW -size 900m "$RW_DMG" >/dev/null
+  MOUNT_OUT="$(hdiutil attach -readwrite -noverify -noautoopen "$RW_DMG")"
+  # grep -o statt sed: hdiutil-Ausgabe hat mehrere "/dev/..."-Zeilen, nur EINE
+  # enthält "/Volumes/..." (die Partitionszeile) -> gezielt NUR den Pfad ziehen.
+  MOUNT_POINT="$(echo "$MOUNT_OUT" | grep -o '/Volumes/[^	]*' | head -1)"
+  [ -n "$MOUNT_POINT" ] || { echo "✗ Mount-Punkt nicht gefunden:"; echo "$MOUNT_OUT"; exit 1; }
+
+  osascript <<APPLESCRIPT || echo "⚠️  Finder-Layout fehlgeschlagen, DMG bleibt trotzdem nutzbar"
+tell application "Finder"
+  tell disk "LocalFlow"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {400, 120, 1720, 920}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    set text size of viewOptions to 13
+    set background picture of viewOptions to file ".background:background.png"
+    set position of item "LocalFlow.app" to {360, 430}
+    set position of item "Applications" to {960, 430}
+    set position of item "ANLEITUNG.txt" to {1230, 690}
+    close
+    open
+    update without registering applications
+    delay 2
+    close
+  end tell
+end tell
+APPLESCRIPT
+
+  if ! hdiutil detach "$MOUNT_POINT" >/tmp/lf_detach.log 2>&1; then
+    sleep 1
+    hdiutil detach "$MOUNT_POINT" -force >/tmp/lf_detach.log 2>&1 \
+      || { echo "✗ Aushängen fehlgeschlagen:"; cat /tmp/lf_detach.log; exit 1; }
+  fi
+  hdiutil convert "$RW_DMG" -format UDZO -ov -o "$DMG" >/dev/null
+  rm -f "$RW_DMG"
+else
+  hdiutil create -volname "LocalFlow" -srcfolder "$STAGE" \
+    -ov -format UDZO "$DMG" >/dev/null
+fi
 rm -rf "$STAGE"
 
 SIZE="$(du -h "$DMG" | cut -f1)"
