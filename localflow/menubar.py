@@ -10,7 +10,7 @@ import threading
 
 import rumps
 
-from . import autostart, config
+from . import autostart, config, onboarding
 from .server import lan_ip, tailscale_ip
 
 log = logging.getLogger("localflow.menubar")
@@ -42,6 +42,14 @@ class MenubarApp(rumps.App):
         self.controller = controller
         self._shown_state = None
         self._ready_shown = False
+        self._in_tick = False  # Reentranz-Schutz (rumps.alert blockiert modal)
+        # Onboarding: läuft nur beim allerersten Start (oder nach manuellem
+        # Reset über 🩺 → "Einrichtung erneut starten"), getrieben vom selben
+        # Tick wie der Rest der App — siehe onboarding.py für die Details.
+        self._onb_active = not onboarding.is_onboarded()
+        self._onb_stage = onboarding.WELCOME
+        self._onb_initial_perms = None
+        self._onb_download_started = False
         self._build_menu()
         self._timer = rumps.Timer(self._tick, 0.3)
         self._timer.start()
@@ -49,10 +57,24 @@ class MenubarApp(rumps.App):
     # ---- Haupt-Thread-Tick: Icon, Status-Zeile, Verlauf, Fehler ----
 
     def _tick(self, _):
+        if self._in_tick:
+            return  # falls ein verschachtelter Timer-Fire während eines
+                     # blockierenden rumps.alert() durchkäme
+        self._in_tick = True
+        try:
+            self._tick_body()
+        finally:
+            self._in_tick = False
+
+    def _tick_body(self):
         c = self.controller
         if c.state != self._shown_state:
             self._shown_state = c.state
             self.title = ICONS.get(c.state, ICONS["idle"])
+
+        if self._onb_active:
+            self._onboarding_tick()
+            return  # keine weiteren Alerts/Status-Updates, solange Einrichtung läuft
 
         if not self._ready_shown and c.engine.loaded:
             self._ready_shown = True
@@ -141,6 +163,7 @@ class MenubarApp(rumps.App):
         diagnose.add(rumps.MenuItem("Log leeren", callback=self._clear_logs))
         diagnose.add(rumps.MenuItem("Berechtigungen prüfen", callback=self._check_perms))
         diagnose.add(rumps.MenuItem("Jetzt nach Updates suchen", callback=self._check_updates_now))
+        diagnose.add(rumps.MenuItem("Einrichtung erneut starten", callback=self._restart_onboarding))
 
         self.menu = [
             self.status_item,
@@ -364,6 +387,172 @@ class MenubarApp(rumps.App):
             target=lambda: self.controller.check_for_update_now(manual=True),
             daemon=True,
         ).start()
+
+    # ---- Einrichtungs-Assistent (nur beim allerersten Start) ----
+
+    def _onboarding_tick(self):
+        try:
+            self._onboarding_step()
+        except Exception:
+            log.exception("Einrichtung fehlgeschlagen — überspringe, App startet normal")
+            self._abort_onboarding()
+
+    def _abort_onboarding(self):
+        """Bricht die Einrichtung defensiv ab. Wird aus einem except-Block
+        gerufen -> darf unter KEINEN Umständen selbst eine Exception werfen
+        (kein rumps.alert hier, das war schon der Fehlerauslöser)."""
+        try:
+            from . import __version__
+
+            onboarding.mark_onboarded(__version__)
+        except Exception:
+            log.exception("Onboarding-Marker konnte nicht gesetzt werden")
+        self._onb_active = False
+
+    def _onboarding_step(self):
+        stage = self._onb_stage
+        if stage == onboarding.WELCOME:
+            rumps.alert(
+                title="Willkommen bei LocalFlow — Schritt 1 von 4",
+                message=("LocalFlow diktiert komplett lokal auf deinem Mac — "
+                         "keine Cloud, kein Abo.\n\nGleich fragt macOS nach ein "
+                         "paar Berechtigungen und lädt einmalig das Spracherkennungs-"
+                         "Modell (~600 MB). Das dauert nur beim ersten Start."),
+            )
+            self._onb_stage = onboarding.MICROPHONE
+        elif stage == onboarding.MICROPHONE:
+            rumps.alert(
+                title="Schritt 2 von 4 — Mikrofon",
+                message=("Als Nächstes fragt macOS nach dem Mikrofon-Zugriff — "
+                         "bitte erlauben, sonst kann LocalFlow nicht zuhören.\n\n"
+                         "Klicke OK, um kurz das Mikrofon zu testen."),
+            )
+            self._try_mic_prompt()
+            self._onb_stage = onboarding.PERMISSIONS
+            self._onb_initial_perms = None
+        elif stage == onboarding.PERMISSIONS:
+            self._onboarding_permissions_step()
+        elif stage == onboarding.RESTART:
+            self._onboarding_restart_step()
+        elif stage == onboarding.MODEL:
+            self._onboarding_model_step()
+        elif stage == onboarding.DONE:
+            self._finish_onboarding()
+
+    def _try_mic_prompt(self):
+        """Öffnet kurz das Mikrofon, um den macOS-Berechtigungs-Dialog auszulösen.
+
+        Erfolg ist nicht zuverlässig abfragbar (macOS liefert das erst beim
+        nächsten echten Zugriff) — wir blockieren also nicht darauf.
+        """
+        try:
+            import sounddevice as sd
+
+            with sd.InputStream(samplerate=16000, channels=1, dtype="float32"):
+                pass
+        except Exception:
+            log.debug("Mikrofon-Probe fehlgeschlagen (kein Gerät? bereits entschieden?)",
+                     exc_info=True)
+
+    def _onboarding_permissions_step(self):
+        from .hotkey import permissions_status, request_permissions
+
+        if self._onb_initial_perms is None:
+            # Erster Tick in diesem Schritt: Dialoge/Fenster EINMALIG anstoßen,
+            # danach nur noch still pollen (kein Dialog-Spam pro Tick).
+            request_permissions()
+            self._onb_initial_perms = dict(permissions_status())
+            subprocess.run(["open", "x-apple.systempreferences:com.apple.preference."
+                                    "security?Privacy_ListenEvent"])
+            subprocess.run(["open", "x-apple.systempreferences:com.apple.preference."
+                                    "security?Privacy_Accessibility"])
+            rumps.alert(
+                title="Schritt 3 von 4 — Berechtigungen",
+                message=("Bitte aktiviere 'LocalFlow' in BEIDEN gerade geöffneten "
+                         "Fenstern (Eingabemonitoring + Bedienungshilfen).\n\n"
+                         "LocalFlow wartet automatisch, bis beide gesetzt sind — "
+                         "du musst nichts weiter klicken."),
+            )
+            self.status_item.title = "⏳ Warte auf Berechtigungen…"
+            return
+
+        current = permissions_status()
+        action = onboarding.permissions_step_action(self._onb_initial_perms, current)
+        if action == "wait":
+            return
+        self._onb_stage = onboarding.RESTART if action == "restart" else onboarding.MODEL
+
+    def _onboarding_restart_step(self):
+        rumps.alert(
+            title="Berechtigungen erteilt! 🎉",
+            message=("Damit die Diktier-Taste zuverlässig funktioniert, muss "
+                     "LocalFlow einmal neu starten.\n\nKlicke OK — das dauert "
+                     "nur eine Sekunde."),
+        )
+        try:
+            onboarding.restart_app()  # ersetzt den Prozess -> kehrt bei Erfolg nie zurück
+        except Exception:
+            log.exception("Automatischer Neustart fehlgeschlagen")
+            rumps.alert(
+                title="LocalFlow",
+                message=("Der automatische Neustart hat nicht geklappt. Bitte "
+                         "beende LocalFlow jetzt über 'Beenden' und öffne es "
+                         "danach erneut — die Einrichtung macht dann direkt weiter."),
+            )
+            self.controller.shutdown()
+            rumps.quit_application()
+
+    def _onboarding_model_step(self):
+        if not self._onb_download_started:
+            self._onb_download_started = True
+            self.status_item.title = "Lädt Whisper-Modell… 0%"
+            rumps.alert(
+                title="Schritt 4 von 4 — Spracherkennung laden",
+                message=("LocalFlow lädt jetzt einmalig das Whisper-Modell "
+                         "(~600 MB). Je nach Internetverbindung dauert das ein "
+                         "bis zwei Minuten — LocalFlow macht danach von selbst weiter."),
+            )
+            threading.Thread(target=self._download_model_bg, daemon=True).start()
+            return
+
+        if self.controller.engine.loaded:
+            self._onb_stage = onboarding.DONE
+
+    def _download_model_bg(self):
+        def on_progress(pct):
+            self.status_item.title = f"Lädt Whisper-Modell… {pct}%"
+
+        try:
+            onboarding.download_with_progress(self.controller.engine.repo, on_progress)
+        except Exception:
+            # Kein Beinbruch: controller.start() hat engine.warmup_async() schon
+            # parallel angestoßen und versucht den Download so oder so erneut.
+            log.debug("Fortschritts-Download im Onboarding fehlgeschlagen", exc_info=True)
+
+    def _finish_onboarding(self):
+        from . import __version__
+
+        onboarding.mark_onboarded(__version__)
+        self._onb_active = False
+        rumps.alert(
+            title="Fertig! 🎉",
+            message=("LocalFlow ist eingerichtet.\n\nHalte die rechte Options-"
+                     "taste (⌥), sprich, lass los — dein Text erscheint an der "
+                     "Cursor-Position."),
+        )
+
+    def _restart_onboarding(self, _):
+        resp = rumps.alert(
+            title="LocalFlow — Einrichtung",
+            message="Den Einrichtungsassistenten jetzt erneut durchlaufen?",
+            ok="Starten", cancel="Abbrechen",
+        )
+        if resp == 1:
+            onboarding.reset_onboarding()
+            self._onb_stage = onboarding.WELCOME
+            self._onb_initial_perms = None
+            self._onb_download_started = False
+            self._onb_active = True
 
     def _quit(self, _):
         self.controller.shutdown()
