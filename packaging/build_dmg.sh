@@ -4,20 +4,30 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-VENV=".venv/bin"
+
+# Python-Interpreter: lokal der Projekt-venv, in CI (kein .venv) das System-/
+# Runner-Python mit den via requirements.txt installierten Paketen.
+if [ -x ".venv/bin/python" ]; then
+  PY=".venv/bin/python"
+else
+  PY="python3"
+fi
+
 # Zentrale Versionsquelle: localflow/__init__.py (NICHT hier hardcoden)
-VERSION="$("$VENV/python" -c 'from localflow import __version__; print(__version__)')"
+VERSION="$("$PY" -c 'from localflow import __version__; print(__version__)')"
 APP="dist/LocalFlow.app"
 DMG="dist/LocalFlow-${VERSION}.dmg"
 
-echo "▸ 1/4  PyInstaller-Build…"
+echo "▸ 1/4  PyInstaller-Build (Python: $PY)…"
 # Etwaige laufende Test-Instanz beenden (hält sonst Dateien im dist/ offen)
 pkill -9 -f "dist/LocalFlow" 2>/dev/null || true
 sleep 1
 rm -rf build dist
-"$VENV/pyinstaller" packaging/LocalFlow.spec --noconfirm --clean \
+# "-m PyInstaller" statt des "pyinstaller"-Kommandos: funktioniert unabhängig
+# davon, ob PyInstaller in einem venv/bin oder systemweit installiert ist.
+"$PY" -m PyInstaller packaging/LocalFlow.spec --noconfirm --clean \
   --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1
-[ -d "$APP" ] || { echo "✗ Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; exit 1; }
+[ -d "$APP" ] || { echo "✗ Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; tail -40 /tmp/pyinstaller.log; exit 1; }
 
 echo "▸ 2/4  Ad-hoc-Signierung (nötig auf Apple Silicon)…"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true

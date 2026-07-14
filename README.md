@@ -45,10 +45,12 @@ Alle Funktionen sind unter **⚙️ Einstellungen** im Menüleisten-Menü einzel
 
 ### Einfach: DMG (empfohlen)
 
-1. `LocalFlow-x.y.z.dmg` öffnen, **LocalFlow** auf den **Programme**-Ordner ziehen.
-2. In *Programme* LocalFlow per **Rechtsklick → Öffnen** starten (nur beim ersten
+1. Neueste Version von der **[Releases-Seite](https://github.com/theminhnguyen/localflow/releases/latest)**
+   herunterladen (`LocalFlow-x.y.z.dmg`) — wird bei jedem Versions-Tag automatisch gebaut.
+2. DMG öffnen, **LocalFlow** auf den **Programme**-Ordner ziehen.
+3. In *Programme* LocalFlow per **Rechtsklick → Öffnen** starten (nur beim ersten
    Mal — die App ist frei/ohne bezahltes Apple-Zertifikat signiert).
-3. macOS fragt nach **Mikrofon**, **Bedienungshilfen** und **Eingabemonitoring**
+4. macOS fragt nach **Mikrofon**, **Bedienungshilfen** und **Eingabemonitoring**
    → alle erlauben und LocalFlow einmal neu starten.
 
 Die App bringt Python und alle Bibliotheken selbst mit — keine weitere Installation
