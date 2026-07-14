@@ -315,11 +315,12 @@ class FlowController:
         config.add_history({
             "text": text, "raw": result["text"], "language": result["language"],
             "seconds": result["seconds"], "source": "mac", "time": time.time(),
-        })
+        }, keep=int(self.cfg.get("history_keep", 50)))
         self.history_dirty = True
         log.info("Diktat (%ss Audio | Whisper %sms | LLM %s): %s",
                  result["seconds"], result["ms"],
-                 f"{llm_ms}ms" if llm_used else "übersprungen 🚀", text[:80])
+                 f"{llm_ms}ms" if llm_used else "übersprungen 🚀",
+                 config.loggable_text(text, self.cfg))
 
     # ---- Datei-Transkription ----
 

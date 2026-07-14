@@ -242,7 +242,7 @@ def create_app(engine, get_language, controller=None) -> Flask:
             config.add_history({
                 "text": text, "raw": result["text"], "language": result["language"],
                 "seconds": result["seconds"], "source": "phone", "time": time.time(),
-            })
+            }, keep=int(c.get("history_keep", 50)))
             if controller is not None:
                 controller.history_dirty = True
                 controller.stats["count"] += 1
@@ -253,7 +253,7 @@ def create_app(engine, get_language, controller=None) -> Flask:
         log.info("Handy-Diktat (%ss Audio, %sms%s%s): %s",
                  result["seconds"], result["ms"],
                  ", LLM" if llm_used else "",
-                 ", eingefügt" if inserted else "", text[:80])
+                 ", eingefügt" if inserted else "", config.loggable_text(text, c))
         return jsonify(
             text=text, raw=result["text"], language=result["language"],
             seconds=result["seconds"], ms=result["ms"], llm_ms=llm_ms,

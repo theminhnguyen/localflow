@@ -3,6 +3,7 @@
 Alles ohne Mikrofon/Modell — Recorder, Engine und Einfügen sind Attrappen.
 """
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -219,3 +220,32 @@ def test_language_cache_resets_on_empty_result():
 def test_fixed_language_bypasses_cache():
     c = make_controller(language="de")
     assert c.effective_language() == "de"
+
+
+# ---- Privacy-Logging (log_texts) ----
+
+def test_log_texts_off_by_default_redacts_dictation(caplog):
+    c = make_controller()  # log_texts nicht gesetzt -> Default False
+    with caplog.at_level(logging.INFO, logger="localflow"):
+        press_hold_release(c)
+        assert wait_idle(c)
+    assert "Diktat 1" not in caplog.text          # Klartext NICHT im Log
+    assert "Zeichen]" in caplog.text               # Platzhalter statt Klartext
+
+
+def test_log_texts_on_shows_dictation_text(caplog):
+    c = make_controller(log_texts=True)
+    with caplog.at_level(logging.INFO, logger="localflow"):
+        press_hold_release(c)
+        assert wait_idle(c)
+    assert "Diktat 1" in caplog.text
+
+
+def test_history_keep_zero_stores_nothing(tmp_path, monkeypatch):
+    import localflow.config as _cfg
+
+    monkeypatch.setattr(_cfg, "HISTORY_FILE", tmp_path / "history.json")
+    c = make_controller(history_keep=0)
+    press_hold_release(c)
+    assert wait_idle(c)
+    assert _cfg.load_history() == []

@@ -65,3 +65,39 @@ def test_version_is_semver_like():
     from localflow import __version__
 
     assert re.match(r"^\d+\.\d+\.\d+$", __version__), __version__
+
+
+# ---- Privacy-Logging ----
+
+def test_loggable_text_redacts_by_default():
+    out = config.loggable_text("Ein geheimes Diktat", {})
+    assert "geheimes" not in out
+    assert out == "[19 Zeichen]"
+
+
+def test_loggable_text_shows_when_enabled():
+    out = config.loggable_text("Ein geheimes Diktat", {"log_texts": True})
+    assert "geheimes" in out
+
+
+def test_log_texts_default_is_false():
+    assert config.DEFAULT_CONFIG["log_texts"] is False
+
+
+def test_history_keep_default_is_50():
+    assert config.DEFAULT_CONFIG["history_keep"] == 50
+
+
+def test_clear_logs_truncates_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    config.LOG_DIR.mkdir(parents=True)
+    f = config.LOG_DIR / "localflow.log"
+    f.write_text("geheimer Log-Inhalt\n" * 5, encoding="utf-8")
+    n = config.clear_logs()
+    assert n == 1
+    assert f.read_text() == ""
+
+
+def test_clear_logs_no_dir_returns_zero(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "does-not-exist")
+    assert config.clear_logs() == 0

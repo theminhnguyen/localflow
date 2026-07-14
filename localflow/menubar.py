@@ -31,6 +31,7 @@ TOGGLES = [
     ("📲 Handy darf am Mac einfügen", "phone_insert"),
     ("🕘 Verlauf fürs Handy freigeben", "share_history"),
     ("🔊 Töne", "sounds"),
+    ("📝 Diktattexte ins Log schreiben (Debug)", "log_texts"),
 ]
 
 
@@ -122,6 +123,7 @@ class MenubarApp(rumps.App):
         diagnose = rumps.MenuItem("🩺 Diagnose")
         diagnose.add(rumps.MenuItem("Status anzeigen", callback=self._show_status))
         diagnose.add(rumps.MenuItem("Log-Datei öffnen", callback=self._open_log))
+        diagnose.add(rumps.MenuItem("Log leeren", callback=self._clear_logs))
         diagnose.add(rumps.MenuItem("Berechtigungen prüfen", callback=self._check_perms))
 
         self.menu = [
@@ -204,13 +206,19 @@ class MenubarApp(rumps.App):
             empty = rumps.MenuItem("(leer)")
             empty.set_callback(None)
             self.history_menu.add(empty)
-            return
-        for e in entries:
-            icon = "📱 " if e.get("source") == "phone" else ""
-            label = icon + e["text"][:60] + ("…" if len(e["text"]) > 60 else "")
-            self.history_menu.add(
-                rumps.MenuItem(label, callback=self._make_copy_cb(e["text"]))
-            )
+        else:
+            for e in entries:
+                icon = "📱 " if e.get("source") == "phone" else ""
+                label = icon + e["text"][:60] + ("…" if len(e["text"]) > 60 else "")
+                self.history_menu.add(
+                    rumps.MenuItem(label, callback=self._make_copy_cb(e["text"]))
+                )
+        self.history_menu.add(None)
+        self.history_menu.add(rumps.MenuItem("Verlauf leeren", callback=self._clear_history))
+
+    def _clear_history(self, _):
+        config.clear_history()
+        self._refresh_history()
 
     def _make_copy_cb(self, text):
         def cb(_):
@@ -303,6 +311,12 @@ class MenubarApp(rumps.App):
             subprocess.run(["open", "-e", str(logfile)])
         else:
             rumps.alert(title="LocalFlow", message="Noch keine Log-Datei vorhanden.")
+
+    def _clear_logs(self, _):
+        n = config.clear_logs()
+        rumps.alert(title="LocalFlow",
+                   message=f"{n} Log-Datei(en) geleert." if n
+                           else "Keine Log-Dateien gefunden.")
 
     def _check_perms(self, _):
         from .hotkey import permissions_status, request_permissions

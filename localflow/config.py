@@ -61,6 +61,13 @@ DEFAULT_CONFIG = {
     # selben WLAN). Bewusst NICHT im ⚙️-Menü — Sicherheit schaltet man nicht
     # versehentlich aus; wer es braucht, editiert config.json.
     "require_auth": True,
+    # Diktattexte im Log-File im Klartext mitschreiben. Default AUS: LocalFlows
+    # Kernversprechen ist "nichts verlässt den Mac" — dann sollen Texte auch
+    # nicht monatelang unverschlüsselt in einer Log-Datei liegen.
+    "log_texts": False,
+    # Wie viele Verlaufs-Einträge behalten werden (Menü "Verlauf"/PWA). 0 = kein
+    # Verlauf speichern.
+    "history_keep": 50,
 }
 
 DEFAULT_DICTIONARY = {
@@ -144,6 +151,32 @@ def add_history(entry: dict, keep: int = 50) -> None:
 def clear_history() -> None:
     with _lock:
         _save_json(HISTORY_FILE, [])
+
+
+def loggable_text(text: str, cfg: dict) -> str:
+    """Text fürs Log-File: nur bei bewusst aktiviertem 'log_texts' im Klartext
+    (gekürzt), sonst nur die Zeichenzahl. Diktate landen so standardmäßig NICHT
+    im Log — siehe 'log_texts' in DEFAULT_CONFIG."""
+    if cfg.get("log_texts", False):
+        return text[:80]
+    return f"[{len(text)} Zeichen]"
+
+
+def clear_logs() -> int:
+    """Leert alle Log-Dateien in LOG_DIR (truncate, Dateien bleiben bestehen).
+
+    Liefert die Anzahl geleerter Dateien.
+    """
+    if not LOG_DIR.exists():
+        return 0
+    n = 0
+    for f in LOG_DIR.glob("*.log*"):
+        try:
+            f.write_text("", encoding="utf-8")
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 # ---- Kopplungs-Token (schützt /api/* vor Fremdzugriff im selben WLAN) ----

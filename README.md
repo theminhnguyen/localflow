@@ -138,7 +138,26 @@ Alle Nutzerdaten liegen in `~/.localflow/`:
 - `config.json` — alle Schalter (auch per ⚙️-Menü bedienbar)
 - `dictionary.json` — `terms` (Erkennungs-Hinweise) & `corrections` (Ersetzungen)
 - `snippets.json` — Sprachbefehl → Textbaustein („Snippet Gruß")
+- `secret.token` — Kopplungs-Token fürs Handy (chmod 600, siehe „iPhone einrichten")
+- `history.json` — die letzten Diktate (Menü *Verlauf*; „Verlauf leeren" löscht alles)
 - `logs/localflow.log` — Diagnose-Log (Menü *🩺 → Log-Datei öffnen*)
+
+## Datenschutz
+
+LocalFlow verarbeitet deine Stimme ausschließlich lokal — Whisper und das
+optionale LLM laufen auf deinem Mac, es gibt keine Cloud-Aufrufe.
+
+- **Diktattexte landen standardmäßig NICHT im Log** — nur „[N Zeichen]" ohne
+  Inhalt. Zum Debuggen einschaltbar: ⚙️ → „📝 Diktattexte ins Log schreiben".
+- **Verlauf** (letzte Diktate, für Menü + Handy) liegt nur lokal in
+  `~/.localflow/history.json`. Jederzeit löschbar über *Verlauf → Verlauf
+  leeren*, oder ganz abschaltbar mit `"history_keep": 0` in `config.json`.
+- **Einzige Netzwerkzugriffe:** der einmalige Whisper-Modell-Download beim
+  ersten Diktat und — falls aktiviert — der Update-Check gegen die
+  GitHub-Releases-API (⚙️ → „🔄 Auf Updates prüfen", abschaltbar).
+- Das **Kopplungs-Token** fürs Handy schützt `/api/*` vor Fremdzugriff im
+  selben WLAN (siehe „iPhone einrichten"). Bei Verdacht auf Missbrauch:
+  Menü → *📱 Handy koppeln → Kopplung zurücksetzen…*.
 
 ## Tests
 
