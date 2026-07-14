@@ -5,6 +5,7 @@ einfügen lassen (Fernmikrofon) und den Diktat-Verlauf des Macs sehen —
 beides über Schalter in den Einstellungen abschaltbar.
 """
 
+import hmac
 import json
 import logging
 import socket
@@ -118,9 +119,25 @@ def ensure_cert() -> tuple:
 def create_app(engine, get_language, controller=None) -> Flask:
     """engine: Engine. get_language: Callable. controller: FlowController (optional)."""
     app = Flask(__name__, static_folder=None)
+    config.load_or_create_token()  # Token früh anlegen, damit die erste Kopplung sofort klappt
 
     def cfg() -> dict:
         return controller.cfg if controller is not None else config.load_config()
+
+    @app.before_request
+    def _check_auth():
+        # Statische PWA-Dateien (inkl. "/") bleiben immer frei — die Seite muss
+        # laden können, bevor ihr JS überhaupt ein Token aus dem Link lesen kann.
+        # /api/ping bleibt frei (reiner Status-Check, keine sensiblen Daten).
+        if not request.path.startswith("/api/") or request.path == "/api/ping":
+            return None
+        if not cfg().get("require_auth", True):
+            return None
+        supplied = request.headers.get("X-LocalFlow-Key", "")
+        current = config.load_or_create_token()
+        if not supplied or not hmac.compare_digest(supplied, current):
+            return jsonify(error="nicht gekoppelt", code="unauthorized"), 401
+        return None
 
     @app.get("/")
     def index():

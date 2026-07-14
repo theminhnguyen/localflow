@@ -1,6 +1,7 @@
 """Konfiguration & Nutzerdaten in ~/.localflow/ (Config, Wörterbuch, Snippets, Verlauf)."""
 
 import json
+import secrets
 import threading
 from pathlib import Path
 
@@ -10,6 +11,7 @@ DICT_FILE = CONFIG_DIR / "dictionary.json"
 SNIPPETS_FILE = CONFIG_DIR / "snippets.json"
 HISTORY_FILE = CONFIG_DIR / "history.json"
 LOG_DIR = CONFIG_DIR / "logs"
+TOKEN_FILE = CONFIG_DIR / "secret.token"
 
 DEFAULT_CONFIG = {
     # mlx-community-Repo oder Kurzname ("turbo-q4", "turbo", "small", "base")
@@ -55,6 +57,10 @@ DEFAULT_CONFIG = {
     "phone_insert": True,
     # Handy darf den Diktat-Verlauf des Macs sehen
     "share_history": True,
+    # Kopplungs-Token für /api/*-Zugriffe verlangen (schützt vor Fremdzugriff im
+    # selben WLAN). Bewusst NICHT im ⚙️-Menü — Sicherheit schaltet man nicht
+    # versehentlich aus; wer es braucht, editiert config.json.
+    "require_auth": True,
 }
 
 DEFAULT_DICTIONARY = {
@@ -133,3 +139,43 @@ def add_history(entry: dict, keep: int = 50) -> None:
         history = _load_json(HISTORY_FILE, [])
         history.insert(0, entry)
         _save_json(HISTORY_FILE, history[:keep])
+
+
+def clear_history() -> None:
+    with _lock:
+        _save_json(HISTORY_FILE, [])
+
+
+# ---- Kopplungs-Token (schützt /api/* vor Fremdzugriff im selben WLAN) ----
+
+def _write_token(tok: str) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = TOKEN_FILE.with_suffix(".tmp")
+    tmp.write_text(tok, encoding="utf-8")
+    tmp.replace(TOKEN_FILE)
+    try:
+        TOKEN_FILE.chmod(0o600)
+    except OSError:
+        pass  # z.B. exotisches Dateisystem — Token bleibt trotzdem geheim genug
+
+
+def load_or_create_token() -> str:
+    """Liefert das Kopplungs-Token, erzeugt es beim allerersten Aufruf."""
+    with _lock:
+        try:
+            tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if tok:
+                return tok
+        except OSError:
+            pass
+        tok = secrets.token_urlsafe(24)
+        _write_token(tok)
+        return tok
+
+
+def reset_token() -> str:
+    """Erzeugt ein neues Token — alle bisher gekoppelten Geräte verlieren den Zugriff."""
+    with _lock:
+        tok = secrets.token_urlsafe(24)
+        _write_token(tok)
+        return tok

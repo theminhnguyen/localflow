@@ -58,12 +58,16 @@ def wav_bytes(seconds=1.0, amplitude=0.1):
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    # require_auth=False: diese Tests prüfen Endpunkt-Verhalten, nicht den
+    # Auth-Layer — der hat eigene, dedizierte Tests weiter unten (auth_client).
     cfg = dict(config.DEFAULT_CONFIG)
-    cfg.update({"llm_enabled": False, "phone_insert": True, "share_history": True})
+    cfg.update({"llm_enabled": False, "phone_insert": True, "share_history": True,
+                "require_auth": False})
     ctrl = FakeController(cfg)
     # Verlauf in temporäre Datei umlenken
     monkeypatch.setattr(config, "HISTORY_FILE", tmp_path / "history.json")
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "secret.token")
     app = create_app(FakeEngine(), lambda: "de", controller=ctrl)
     app.config["TESTING"] = True
     return app.test_client(), ctrl
@@ -138,3 +142,81 @@ def test_status_endpoint(client):
 def test_missing_audio_is_400(client):
     c, ctrl = client
     assert c.post("/api/transcribe", data={}).status_code == 400
+
+
+# ---- Kopplungs-Token / Auth-Guard (require_auth=True, der echte Standard) ----
+
+@pytest.fixture()
+def auth_client(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "HISTORY_FILE", tmp_path / "history.json")
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "secret.token")
+    cfg = dict(config.DEFAULT_CONFIG)
+    cfg.update({"llm_enabled": False, "phone_insert": True, "share_history": True,
+                "require_auth": True})
+    ctrl = FakeController(cfg)
+    app = create_app(FakeEngine(), lambda: "de", controller=ctrl)
+    app.config["TESTING"] = True
+    token = config.load_or_create_token()
+    return app.test_client(), ctrl, token
+
+
+def test_auth_blocks_transcribe_without_token(auth_client):
+    c, ctrl, token = auth_client
+    r = c.post("/api/transcribe", data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert r.status_code == 401
+    assert r.get_json()["code"] == "unauthorized"
+
+
+def test_auth_allows_with_correct_token(auth_client):
+    c, ctrl, token = auth_client
+    r = c.post("/api/transcribe", headers={"X-LocalFlow-Key": token},
+               data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert r.status_code == 200
+    assert r.get_json()["text"] == "Hallo vom Handy."
+
+
+def test_auth_rejects_wrong_token(auth_client):
+    c, ctrl, token = auth_client
+    r = c.post("/api/transcribe", headers={"X-LocalFlow-Key": "definitiv-falsch"},
+               data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert r.status_code == 401
+
+
+def test_auth_protects_history_and_status(auth_client):
+    c, ctrl, token = auth_client
+    assert c.get("/api/history").status_code == 401
+    assert c.get("/api/status").status_code == 401
+    assert c.get("/api/history", headers={"X-LocalFlow-Key": token}).status_code == 200
+    assert c.get("/api/status", headers={"X-LocalFlow-Key": token}).status_code == 200
+
+
+def test_auth_ping_stays_open(auth_client):
+    c, ctrl, token = auth_client
+    assert c.get("/api/ping").status_code == 200  # kein Header nötig
+
+
+def test_auth_static_pwa_stays_open(auth_client):
+    c, ctrl, token = auth_client
+    assert c.get("/").status_code == 200
+    assert c.get("/manifest.webmanifest").status_code == 200
+
+
+def test_require_auth_false_bypasses_guard(auth_client):
+    c, ctrl, token = auth_client
+    ctrl.cfg["require_auth"] = False
+    r = c.post("/api/transcribe", data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert r.status_code == 200
+
+
+def test_auth_token_survives_reset_of_wrong_guess(auth_client, monkeypatch):
+    """Nach config.reset_token() ist das alte Token ungültig, das neue gültig."""
+    c, ctrl, token = auth_client
+    new_token = config.reset_token()
+    assert new_token != token
+    old = c.post("/api/transcribe", headers={"X-LocalFlow-Key": token},
+                 data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert old.status_code == 401
+    fresh = c.post("/api/transcribe", headers={"X-LocalFlow-Key": new_token},
+                   data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert fresh.status_code == 200

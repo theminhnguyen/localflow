@@ -116,6 +116,8 @@ class MenubarApp(rumps.App):
             phone.add(rumps.MenuItem("QR-Code anzeigen (unterwegs/Tailscale)",
                                      callback=self._show_qr_tailscale))
         phone.add(rumps.MenuItem("Link kopieren", callback=self._copy_link))
+        phone.add(None)
+        phone.add(rumps.MenuItem("Kopplung zurücksetzen…", callback=self._reset_pairing))
 
         diagnose = rumps.MenuItem("🩺 Diagnose")
         diagnose.add(rumps.MenuItem("Status anzeigen", callback=self._show_status))
@@ -246,7 +248,10 @@ class MenubarApp(rumps.App):
 
     def _url(self, ip=None):
         port = self.controller.cfg.get("server_port", 8790)
-        return f"https://{ip or lan_ip()}:{port}"
+        token = config.load_or_create_token()
+        # Token als URL-Fragment ("#k="): Fragmente werden vom Browser NIE mitgesendet
+        # (auch nicht an den eigenen Server) und tauchen darum in keinem Zugriffs-Log auf.
+        return f"https://{ip or lan_ip()}:{port}/#k={token}"
 
     def _copy_link(self, _):
         subprocess.run(["pbcopy"], input=self._url().encode())
@@ -266,6 +271,19 @@ class MenubarApp(rumps.App):
         path = config.CONFIG_DIR / filename
         img.save(path)
         subprocess.run(["open", str(path)])
+
+    def _reset_pairing(self, _):
+        resp = rumps.alert(
+            title="LocalFlow — Kopplung zurücksetzen",
+            message=("Alle bisher gekoppelten Handys verlieren den Zugriff und "
+                     "müssen den QR-Code erneut scannen.\n\nFortfahren?"),
+            ok="Zurücksetzen", cancel="Abbrechen",
+        )
+        if resp == 1:
+            config.reset_token()
+            rumps.alert(title="LocalFlow",
+                       message="Kopplung zurückgesetzt. Zeig den neuen QR-Code "
+                               "erneut an, damit sich Handys neu koppeln können.")
 
     def _open_dict(self, _):
         config.ensure_files()
