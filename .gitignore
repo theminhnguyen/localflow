@@ -9,3 +9,8 @@ __pycache__/
 /dist/
 *.dmg
 *.spec.bak
+# Code-Signing: PRIVATER SCHLÜSSEL DARF NIEMALS INS REPO (öffentlich!)
+*.key
+*.p12
+packaging/signing/localflow-codesign.key
+packaging/signing/localflow-codesign.p12

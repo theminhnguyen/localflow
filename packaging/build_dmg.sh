@@ -29,8 +29,21 @@ rm -rf build dist
   --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1
 [ -d "$APP" ] || { echo "✗ Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; tail -40 /tmp/pyinstaller.log; exit 1; }
 
-echo "▸ 2/4  Ad-hoc-Signierung (nötig auf Apple Silicon)…"
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+# Stabile Signatur bevorzugen: mit ihr überleben die macOS-Berechtigungen jedes
+# Update (Designated Requirement = Bundle-ID + Zertifikat, siehe setup_signing.sh).
+# Ist der Signatur-Schlüsselbund nicht eingerichtet (z.B. frischer CI-Runner),
+# fällt es sauber auf ad-hoc zurück.
+SIGN_IDENTITY="LocalFlow Code Signing"
+SIGN_KC="$HOME/Library/Keychains/localflow-signing.keychain-db"
+if [ -f "$SIGN_KC" ] && security find-identity -p codesigning "$SIGN_KC" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  echo "▸ 2/4  Signieren mit stabiler Identität ('$SIGN_IDENTITY')…"
+  security unlock-keychain -p "localflow-build" "$SIGN_KC" 2>/dev/null || true
+  codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$SIGN_KC" "$APP" >/dev/null 2>&1 \
+    || codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+else
+  echo "▸ 2/4  Ad-hoc-Signierung (stabile Identität nicht eingerichtet)…"
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+fi
 
 echo "▸ 3/4  DMG-Layout vorbereiten…"
 STAGE="$(mktemp -d)"
