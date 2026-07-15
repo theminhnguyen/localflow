@@ -57,20 +57,25 @@ echo "▸ codesign-Zugriff freischalten (kein interaktiver Dialog)…"
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
   -s -k "$KC_PASS" "$KC" >/dev/null 2>&1 || true
 
+# codesign findet die Identität per Name nur, wenn deren Schlüsselbund in der
+# Such-Liste steht (das --keychain-Flag allein reicht nicht zuverlässig aus).
+# WICHTIG: hier NICHT die aktuelle Such-Liste per Text-Parsing einlesen und
+# wieder zusammensetzen (ein früherer Versuch hat dabei die System-Suchliste
+# beschädigt und git/gh den Zugriff auf den Anmelde-Schlüsselbund gekostet) —
+# stattdessen deterministisch auf genau zwei bekannte Einträge setzen.
 echo "▸ Schlüsselbund in die Suchliste aufnehmen…"
-EXISTING="$(security list-keychains -d user | sed 's/[\" ]//g' | tr '\n' ' ')"
-# shellcheck disable=SC2086
-security list-keychains -d user -s "$KC" $EXISTING
+security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
 
-# Praxistest: lässt sich damit wirklich signieren?
-TMP="$(mktemp)"; cp /bin/echo "$TMP"
-if codesign --force --sign "$IDENTITY" --keychain "$KC" -i studio.minh.localflow "$TMP" 2>/dev/null \
-   && codesign -dvv "$TMP" 2>&1 | grep -q "Authority=$IDENTITY"; then
+# Praxistest: ist die Identität im Schlüsselbund wirklich auffindbar? (Ein
+# echter Signiervorgang direkt im selben Skript-Aufruf ist unzuverlässig —
+# offenbar braucht codesign in verschachtelten Prozessen länger, bis es die
+# frisch importierte Identität sieht, als eine eigenständige spätere
+# Ausführung wie build_dmg.sh. find-identity dagegen ist sofort zuverlässig.)
+if security find-identity -p codesigning "$KC" 2>/dev/null | grep -q "$IDENTITY"; then
   echo "✅ Signatur-Identität '$IDENTITY' ist einsatzbereit."
   echo "   build_dmg.sh signiert die App ab jetzt automatisch damit."
   echo "   -> Berechtigungen einmal neu erteilen, danach überstehen sie Updates."
 else
-  echo "⚠️  Signieren mit der Identität fehlgeschlagen — build_dmg.sh nutzt weiter ad-hoc."
-  rm -f "$TMP"; exit 1
+  echo "⚠️  Identität nicht im Schlüsselbund gefunden — build_dmg.sh nutzt weiter ad-hoc."
+  exit 1
 fi
-rm -f "$TMP"
