@@ -6,6 +6,20 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.5.3] — 2026-07-15
+
+### Fixed
+- **Berechtigungen überlebten Updates nicht — jetzt schon.** Auch nach den
+  Fixes in 0.5.2 gingen Bedienungshilfen-/Eingabemonitoring-Rechte nach dem
+  nächsten Bau wieder verloren, obwohl das Häkchen aktiv aussah. Ursache: ohne
+  bezahltes Apple-Zertifikat wird ad-hoc signiert, und macOS bindet diese
+  Rechte dabei an die PRÜFSUMME der Programmdatei — die sich bei jedem Build
+  ändert. Ab jetzt signiert LocalFlow mit einem eigenen, kostenlosen
+  Code-Signing-Zertifikat (`packaging/setup_signing.sh`, einmalig lokal
+  auszuführen). Damit bleibt die Signatur über Builds hinweg stabil, die
+  Rechte überstehen künftige Updates. Fällt auf ad-hoc zurück, falls das
+  Zertifikat nicht eingerichtet ist (z. B. auf frischen CI-Runnern).
+
 ## [0.5.2] — 2026-07-14
 
 ### Fixed
