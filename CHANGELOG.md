@@ -6,6 +6,26 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.5.4] — 2026-07-15
+
+### Fixed
+- **Umlaute wurden beim Einfügen manchmal zu Kauderwelsch.** Diktierter Text mit
+  ä/ö/ü/ß kam bei einer per synthetischem ⌘V ausgelösten Einfüge-Aktion in der
+  Ziel-App manchmal als Mojibake an ("√Ñ" statt "Ä"), obwohl die Zwischenablage
+  selbst beim direkten Auslesen (`pbpaste`) korrekt war — die Ziel-App las
+  offenbar eine andere, vom System automatisch mit-erzeugte Zwischenablage-
+  Variante als LocalFlows synthetisches ⌘V. Behoben, indem die Zwischenablage
+  jetzt direkt über die native `NSPasteboard`-API (statt über die
+  `pbcopy`/`pbpaste`-Kommandozeilen-Werkzeuge) gesetzt und gelesen wird — der
+  Weg, den auch echte Mac-Apps selbst nutzen. Betraf sowohl das Diktat-
+  Einfügen als auch "Verlauf kopieren" und "Letztes Diktat kopieren" im Menü.
+
+### Added (Vorarbeit Phase 3 — native Swift-Hülle)
+- `--serve-only`-Engine-Modus reagiert jetzt sauber auf SIGTERM (nötig, damit
+  eine künftige Swift-App den Python-Dienst kontrolliert beenden kann).
+- Neuer Endpunkt `POST /api/insert` (Token-geschützt): fügt gelieferten Text
+  über den bewährten Weg ein — Fallback, falls natives Einfügen mal nicht greift.
+
 ## [0.5.3] — 2026-07-15
 
 ### Fixed

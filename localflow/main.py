@@ -16,6 +16,7 @@ Ablauf-Architektur (Fix für den „roter Kreis hängt"-Bug):
 import argparse
 import logging
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -495,11 +496,19 @@ def main() -> None:
 
     if args.serve_only:
         controller.engine.warmup_async()
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            pass
+        # Engine-Modus (Phase 3, Swift-Hülle): Swift beendet den Prozess sauber
+        # per SIGTERM. Ohne Handler würde Python sofort ohne Log-Zeile sterben —
+        # mit Handler ist ein Absturz vom gewollten Beenden unterscheidbar.
+        stop = threading.Event()
+
+        def _handle_stop(signum, _frame):
+            log.info("Engine beendet sich (Signal %s)…", signum)
+            stop.set()
+
+        signal.signal(signal.SIGTERM, _handle_stop)
+        signal.signal(signal.SIGINT, _handle_stop)
+        while not stop.is_set():
+            stop.wait(3600)
         return
 
     controller.start()

@@ -11,6 +11,7 @@ import threading
 import rumps
 
 from . import autostart, config, onboarding
+from .inserter import copy_to_clipboard
 from .server import lan_ip, tailscale_ip
 
 log = logging.getLogger("localflow.menubar")
@@ -265,7 +266,7 @@ class MenubarApp(rumps.App):
 
     def _make_copy_cb(self, text):
         def cb(_):
-            subprocess.run(["pbcopy"], input=text.encode("utf-8"))
+            copy_to_clipboard(text)
         return cb
 
     # ---- Aktionen ----
@@ -295,7 +296,7 @@ class MenubarApp(rumps.App):
     def _copy_last(self, _):
         entries = config.load_history()
         if entries:
-            subprocess.run(["pbcopy"], input=entries[0]["text"].encode("utf-8"))
+            copy_to_clipboard(entries[0]["text"])
 
     def _url(self, ip=None, path=""):
         port = self.controller.cfg.get("server_port", 8790)
@@ -305,7 +306,7 @@ class MenubarApp(rumps.App):
         return f"https://{ip or lan_ip()}:{port}/{path}#k={token}"
 
     def _copy_link(self, _):
-        subprocess.run(["pbcopy"], input=self._url().encode())
+        copy_to_clipboard(self._url())
 
     def _open_settings_page(self, _):
         # 127.0.0.1 statt LAN-IP: wir öffnen sie vom Mac selbst aus, und das

@@ -10,6 +10,7 @@ könnte den Hotkey-Listener aus dem Tritt bringen.
 """
 
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -17,16 +18,52 @@ import time
 log = logging.getLogger("localflow.inserter")
 
 
+def _pbcopy_env() -> dict:
+    """Umgebung für den pbcopy/pbpaste-Fallback ohne das von Python selbst
+    gesetzte LC_CTYPE (PEP 538 C-Locale-Coercion) — pbcopy kennt "C.UTF-8"
+    nicht als echte macOS-Locale und kann Text sonst falsch kodieren."""
+    env = dict(os.environ)
+    env.pop("LC_CTYPE", None)
+    return env
+
+
 def _pbpaste() -> str:
-    r = subprocess.run(["pbpaste"], capture_output=True)
+    # Direkt über NSPasteboard (Cocoa) statt über die pbcopy/pbpaste-Shell-Tools:
+    # zuverlässiger als Subprocess+Locale und das, was echte Mac-Apps selbst nutzen.
+    # Ein Bug, bei dem über LocalFlows eigenes synthetisches ⌘V eingefügte Umlaute
+    # als Mojibake ankamen (Ziel-App las eine falsche Zwischenablage-Variante),
+    # verschwand reproduzierbar, sobald NSPasteboard statt der pbcopy-Shell schrieb.
     try:
-        return r.stdout.decode("utf-8")
-    except UnicodeDecodeError:
-        return ""
+        from AppKit import NSPasteboard, NSPasteboardTypeString
+
+        pb = NSPasteboard.generalPasteboard()
+        return pb.stringForType_(NSPasteboardTypeString) or ""
+    except Exception:
+        log.debug("NSPasteboard nicht verfügbar, Fallback auf pbpaste", exc_info=True)
+        r = subprocess.run(["pbpaste"], capture_output=True, env=_pbcopy_env())
+        try:
+            return r.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
 
 
 def _pbcopy(text: str) -> None:
-    subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+    try:
+        from AppKit import NSPasteboard, NSPasteboardTypeString
+
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.setString_forType_(text, NSPasteboardTypeString)
+    except Exception:
+        log.debug("NSPasteboard nicht verfügbar, Fallback auf pbcopy", exc_info=True)
+        subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True,
+                        env=_pbcopy_env())
+
+
+def copy_to_clipboard(text: str) -> None:
+    """Öffentlicher Zwischenablage-Helfer (Menü: Verlauf/Diktat/Link kopieren) —
+    nutzt denselben NSPasteboard-Weg wie das Einfügen."""
+    _pbcopy(text)
 
 
 def _post_cmd_v_quartz() -> bool:

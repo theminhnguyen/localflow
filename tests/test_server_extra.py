@@ -146,6 +146,37 @@ def test_insert_respects_setting(client, monkeypatch):
     assert calls == []
 
 
+def test_api_insert_calls_inserter(client, monkeypatch):
+    c, ctrl = client
+    calls = []
+    import localflow.inserter as ins
+
+    monkeypatch.setattr(ins, "insert_text", lambda t, m="paste": (calls.append((t, m)), True)[1])
+    r = c.post("/api/insert", json={"text": "Hallo Swift-Hülle"})
+    assert r.status_code == 200
+    assert r.get_json()["inserted"] is True
+    assert calls == [("Hallo Swift-Hülle", "paste")]
+
+
+def test_api_insert_rejects_empty_text(client):
+    c, ctrl = client
+    r = c.post("/api/insert", json={"text": "   "})
+    assert r.status_code == 400
+    r = c.post("/api/insert", json={})
+    assert r.status_code == 400
+
+
+def test_api_insert_requires_auth(auth_client, monkeypatch):
+    c, ctrl, token = auth_client
+    import localflow.inserter as ins
+
+    monkeypatch.setattr(ins, "insert_text", lambda t, m="paste": True)
+    r = c.post("/api/insert", json={"text": "x"})
+    assert r.status_code == 401
+    r = c.post("/api/insert", json={"text": "x"}, headers={"X-LocalFlow-Key": token})
+    assert r.status_code == 200
+
+
 def test_silence_returns_empty(client):
     c, ctrl = client
     r = c.post("/api/transcribe", data={

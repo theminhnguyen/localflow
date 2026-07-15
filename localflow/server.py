@@ -249,6 +249,19 @@ def create_app(engine, get_language, controller=None) -> Flask:
             applied[key] = value
         return jsonify(ok=True, applied=applied)
 
+    @app.post("/api/insert")
+    def insert():
+        # Für die Swift-Hülle (Phase 3): Fallback, falls das native Einfügen dort
+        # mal nicht greift — Python macht es dann über den bewährten Weg.
+        data = request.get_json(silent=True) or {}
+        text = data.get("text", "")
+        if not isinstance(text, str) or not text.strip():
+            return jsonify(error="Feld 'text' fehlt oder ist leer"), 400
+        from .inserter import insert_text
+
+        inserted = insert_text(text, cfg().get("insert_mode", "paste"))
+        return jsonify(ok=True, inserted=inserted)
+
     @app.post("/api/transcribe")
     def transcribe():
         from . import llm
