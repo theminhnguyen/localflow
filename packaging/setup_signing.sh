@@ -14,9 +14,9 @@
 # -> macOS erkennt die App über Zertifikat + Bundle-ID wieder, die Rechte
 # überleben Updates.
 #
-# Alles läuft in einem EIGENEN Schlüsselbund mit selbst gesetztem Passwort —
-# der Anmelde-Schlüsselbund und das Login-Passwort werden NICHT angefasst, es
-# erscheint keine Passwort-Abfrage.
+# Alles läuft in einem EIGENEN Schlüsselbund mit zufällig erzeugtem, nur lokal
+# gespeichertem Passwort — der Anmelde-Schlüsselbund und das Login-Passwort
+# werden NICHT angefasst, es erscheint keine Passwort-Abfrage.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -25,9 +25,16 @@ CRT="$SIGN_DIR/localflow-codesign.crt"
 KEY="$SIGN_DIR/localflow-codesign.key"
 P12="$SIGN_DIR/localflow-codesign.p12"
 IDENTITY="LocalFlow Code Signing"
-P12_PASS="localflow"
 KC="$HOME/Library/Keychains/localflow-signing.keychain-db"
-KC_PASS="localflow-build"
+
+# Passwörter werden zufällig erzeugt und NUR lokal abgelegt (gitignored) —
+# nie als Klartext in ein Skript schreiben, das ins öffentliche Repo geht.
+P12_PASS_FILE="$SIGN_DIR/.p12_pass"
+KC_PASS_FILE="$SIGN_DIR/.keychain_pass"
+[ -f "$P12_PASS_FILE" ] || { umask 077; openssl rand -hex 24 > "$P12_PASS_FILE"; }
+[ -f "$KC_PASS_FILE" ] || { umask 077; openssl rand -hex 24 > "$KC_PASS_FILE"; }
+P12_PASS="$(cat "$P12_PASS_FILE")"
+KC_PASS="$(cat "$KC_PASS_FILE")"
 
 # p12 bei Bedarf aus crt+key erzeugen (nur das öffentliche crt liegt im Repo;
 # key/p12 sind gitignored und werden lokal (neu) erstellt).

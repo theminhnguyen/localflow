@@ -14,3 +14,6 @@ __pycache__/
 *.p12
 packaging/signing/localflow-codesign.key
 packaging/signing/localflow-codesign.p12
+# Code-Signing: lokal erzeugte Passwörter, ebenfalls niemals ins Repo
+packaging/signing/.p12_pass
+packaging/signing/.keychain_pass

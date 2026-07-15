@@ -35,9 +35,10 @@ rm -rf build dist
 # fällt es sauber auf ad-hoc zurück.
 SIGN_IDENTITY="LocalFlow Code Signing"
 SIGN_KC="$HOME/Library/Keychains/localflow-signing.keychain-db"
-if [ -f "$SIGN_KC" ] && security find-identity -p codesigning "$SIGN_KC" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+SIGN_KC_PASS_FILE="packaging/signing/.keychain_pass"
+if [ -f "$SIGN_KC" ] && [ -f "$SIGN_KC_PASS_FILE" ] && security find-identity -p codesigning "$SIGN_KC" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   echo "▸ 2/4  Signieren mit stabiler Identität ('$SIGN_IDENTITY')…"
-  security unlock-keychain -p "localflow-build" "$SIGN_KC" 2>/dev/null || true
+  security unlock-keychain -p "$(cat "$SIGN_KC_PASS_FILE")" "$SIGN_KC" 2>/dev/null || true
   codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$SIGN_KC" "$APP" >/dev/null 2>&1 \
     || codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 else
