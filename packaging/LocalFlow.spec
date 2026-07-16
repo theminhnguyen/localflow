@@ -92,3 +92,69 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "13.0",
     },
 )
+
+# ---------------------------------------------------------------------------
+# Zweites Ziel: "LocalFlow-Engine" — reiner Engine-Prozess ohne Menüleiste
+# (Phase 3, Vorarbeit für die native Swift-Hülle, siehe
+# docs/PLAN-PROFESSIONALISIERUNG.md). console=True, KEIN .app-Bundle, nur ein
+# COLLECT-Ordner — Swift startet das Binary als Subprozess mit --serve-only
+# und spricht per HTTP mit ihm, genau wie heute schon die iPhone-PWA.
+#
+# Selber launcher.py wie oben (ruft main(), das --serve-only auswertet) —
+# "rumps" wird bewusst excludet: ohne --serve-only würde main() versuchen,
+# die Menüleiste zu laden, was hier absichtlich fehlschlägt (dieses Binary
+# ist NUR für den Engine-Modus gedacht).
+# ---------------------------------------------------------------------------
+
+datas_e, binaries_e, hiddenimports_e = [], [], []
+for pkg in ("mlx", "mlx_whisper", "sounddevice", "_sounddevice_data",
+            "qrcode", "PIL", "numba", "llvmlite"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas_e += d
+        binaries_e += b
+        hiddenimports_e += h
+    except Exception:
+        pass
+
+datas_e += [(os.path.join(ROOT, "localflow", "web"), "localflow/web")]
+
+hiddenimports_e += ["objc", "Foundation", "AppKit", "Quartz", "CoreFoundation"]
+hiddenimports_e += collect_submodules("Quartz")
+hiddenimports_e += ["flask", "werkzeug", "jinja2", "pynput",
+                    "pynput.keyboard._darwin", "pynput.mouse._darwin"]
+
+a_engine = Analysis(
+    [os.path.join(ROOT, "packaging", "launcher.py")],
+    pathex=[ROOT],
+    binaries=binaries_e,
+    datas=datas_e,
+    hiddenimports=hiddenimports_e,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=["torch", "torchvision", "torchaudio",
+              "mlx_whisper.torch_whisper",
+              "numba.tests", "numba.cuda", "llvmlite.tests",
+              "tkinter", "PyInstaller", "pytest", "matplotlib", "IPython",
+              "pandas", "notebook",
+              "rumps"],
+    noarchive=False,
+)
+
+pyz_engine = PYZ(a_engine.pure)
+
+exe_engine = EXE(
+    pyz_engine, a_engine.scripts, [],
+    exclude_binaries=True,
+    name="LocalFlow-Engine",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=True,            # kein GUI/Dock — reiner Hintergrund-Prozess
+    target_arch="arm64",
+)
+
+coll_engine = COLLECT(
+    exe_engine, a_engine.binaries, a_engine.datas,
+    strip=False, upx=False, name="LocalFlow-Engine",
+)
