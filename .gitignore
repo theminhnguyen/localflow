@@ -17,3 +17,7 @@ packaging/signing/localflow-codesign.p12
 # Code-Signing: lokal erzeugte Passwörter, ebenfalls niemals ins Repo
 packaging/signing/.p12_pass
 packaging/signing/.keychain_pass
+# Swift-Hülle (Phase 3): .xcodeproj wird per "xcodegen generate" aus
+# swift/project.yml erzeugt, Build-Output ebenfalls nicht ins Repo
+swift/LocalFlow.xcodeproj/
+swift/build/

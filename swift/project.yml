@@ -1,0 +1,30 @@
+name: LocalFlow
+options:
+  bundleIdPrefix: studio.minh
+targets:
+  LocalFlow:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: LocalFlow
+    settings:
+      base:
+        # .dev-Suffix während der Entwicklung: die fertige Python-App (echte
+        # Bundle-ID studio.minh.localflow) bleibt parallel unberührt nutzbar.
+        # Sobald die Swift-Hülle die Python-App ersetzt (Phase 3.4), wird hier
+        # auf "studio.minh.localflow" umgestellt.
+        PRODUCT_BUNDLE_IDENTIFIER: studio.minh.localflow.dev
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "LocalFlow wandelt deine Sprache lokal in Text um."
+        INFOPLIST_KEY_NSHumanReadableCopyright: "MIT — Minh Nguyen"
+        # Ad-hoc-Signatur: reicht für lokale Entwicklung inkl. Bedienungshilfen-
+        # Berechtigung (siehe packaging/setup_signing.sh für die stabile
+        # Release-Signatur, die in Phase 3.4 übernommen wird).
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: YES
