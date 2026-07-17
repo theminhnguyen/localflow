@@ -9,7 +9,11 @@ final class EngineProcess {
         case stopped, starting, running, crashed
     }
 
-    static let defaultPort = 8790
+    // Eigener Port während der Entwicklung (siehe project.yml: .dev-Bundle-ID) —
+    // damit läuft die Swift-Test-App neben der echten Python-App (Port 8790)
+    // her, ohne dass sich beide um denselben Port streiten. Wechselt auf 8790,
+    // sobald die Swift-App die Python-App ersetzt (Phase 3.4).
+    static let defaultPort = 8799
 
     private(set) var state: State = .stopped
     private var process: Process?
@@ -42,6 +46,17 @@ final class EngineProcess {
         let p = Process()
         p.executableURL = engineURL
         p.arguments = ["--serve-only", "--port", String(port)]
+
+        // Engine-Log mitschreiben statt ins Leere laufen zu lassen — sonst sind
+        // Startfehler (z.B. Port belegt) von außen unsichtbar.
+        let logURL = FileManager.default.temporaryDirectory.appendingPathComponent("localflow-engine.log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        if let handle = try? FileHandle(forWritingTo: logURL) {
+            p.standardOutput = handle
+            p.standardError = handle
+        }
+        NSLog("LocalFlow: Engine-Log unter %@", logURL.path)
+
         p.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self = self, self.state != .stopped else { return }
