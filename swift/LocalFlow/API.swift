@@ -12,7 +12,6 @@ enum LocalFlowToken {
 
 struct TranscribeResult {
     let text: String
-    let inserted: Bool
 }
 
 enum LocalFlowAPIError: Error {
@@ -43,10 +42,12 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         task.resume()
     }
 
-    /// Lädt eine WAV-Aufnahme hoch, lässt sie transkribieren und (falls `insert`)
-    /// direkt am Mac-Cursor einfügen — Python übernimmt Cleanup/LLM-Feinschliff/
-    /// Einfügen wie bisher (server.py `/api/transcribe`), Swift steuert nur Aufnahme+Hotkey.
-    func transcribe(fileURL: URL, insert: Bool, language: String? = nil,
+    /// Lädt eine WAV-Aufnahme hoch und lässt sie transkribieren (server.py
+    /// `/api/transcribe`): Python übernimmt Whisper, Cleanup und LLM-Feinschliff.
+    /// Das Einfügen macht die Swift-Seite selbst (siehe Paster) — der
+    /// `insert=1`-Weg der Engine funktioniert aus dem Kindprozess heraus nicht.
+    /// Die Sprache lässt die Engine über ihren eigenen Sprach-Cache bestimmen.
+    func transcribe(fileURL: URL,
                      completion: @escaping (Result<TranscribeResult, Error>) -> Void) {
         guard let audioData = try? Data(contentsOf: fileURL) else {
             completion(.failure(LocalFlowAPIError.cannotReadAudioFile))
@@ -64,23 +65,12 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        func addField(name: String, value: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(value)\r\n".data(using: .utf8)!)
-        }
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\r\n"
             .data(using: .utf8)!)
         body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
-        if insert {
-            addField(name: "insert", value: "1")
-        }
-        if let language = language {
-            addField(name: "language", value: language)
-        }
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
@@ -102,8 +92,7 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
                 return
             }
             let text = json["text"] as? String ?? ""
-            let inserted = json["inserted"] as? Bool ?? false
-            completion(.success(TranscribeResult(text: text, inserted: inserted)))
+            completion(.success(TranscribeResult(text: text)))
         }
         task.resume()
     }

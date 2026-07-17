@@ -19,7 +19,8 @@ echo "▸ Bauen (Debug)…"
 xcodebuild -project LocalFlow.xcodeproj -scheme LocalFlow -configuration Debug \
   -derivedDataPath build build
 
-APP="build/Build/Products/Debug/LocalFlow.app"
+APP="build/Build/Products/Debug/LocalFlow-Dev.app"
+INSTALLED="/Applications/LocalFlow-Dev.app"
 
 # Stabile Signatur bevorzugen (wie bei der Python-App, siehe packaging/build_dmg.sh
 # und packaging/setup_signing.sh): sonst brechen Eingabemonitoring-/Mikrofon-
@@ -36,5 +37,17 @@ else
   echo "▸ Ad-hoc-Signatur (stabile Identität nicht eingerichtet — siehe packaging/setup_signing.sh)…"
 fi
 
-echo "✅ Fertig: swift/$APP"
-echo "   Starten:  open swift/$APP"
+# Nach /Applications installieren statt aus dem Build-Ordner zu starten: die
+# Berechtigungen stehen dort unter einem festen Pfad in den Systemeinstellungen,
+# und der Build-Ordner soll keine startbare Zweitkopie herumliegen lassen.
+echo "▸ Nach $INSTALLED installieren…"
+pkill -f "LocalFlow-Dev.app" 2>/dev/null || true
+pkill -f "dist/LocalFlow-Engine" 2>/dev/null || true
+sleep 1
+rm -rf "$INSTALLED"
+cp -R "$APP" "$INSTALLED"
+
+echo "✅ Fertig: $INSTALLED"
+echo "   Starten:  open -a $INSTALLED --args --hotkey alt_l"
+echo "   (--hotkey alt_l: sonst greift die Test-App nach derselben rechten"
+echo "    Wahltaste wie die echte LocalFlow-App)"

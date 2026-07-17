@@ -120,8 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         render(status: "Verarbeitet…")
-        // insert: false — das Einfügen macht die Swift-Seite selbst (siehe Paster).
-        LocalFlowAPI.shared.transcribe(fileURL: url, insert: false) { [weak self] result in
+        LocalFlowAPI.shared.transcribe(fileURL: url) { [weak self] result in
             try? FileManager.default.removeItem(at: url)
             switch result {
             case .success(let r):

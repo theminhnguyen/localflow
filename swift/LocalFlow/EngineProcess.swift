@@ -38,7 +38,7 @@ final class EngineProcess {
     func start(onStateChange: @escaping (State) -> Void) {
         self.onStateChange = onStateChange
         guard FileManager.default.fileExists(atPath: engineURL.path) else {
-            NSLog("LocalFlow: Engine-Binary fehlt unter %@", engineURL.path)
+            DevLog.log("EngineProcess: ✗ Engine-Binary fehlt unter \(engineURL.path)")
             setState(.crashed)
             return
         }
@@ -55,7 +55,7 @@ final class EngineProcess {
             p.standardOutput = handle
             p.standardError = handle
         }
-        NSLog("LocalFlow: Engine-Log unter %@", logURL.path)
+        DevLog.log("EngineProcess: Engine-Log unter \(logURL.path)")
 
         p.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async {
@@ -69,7 +69,7 @@ final class EngineProcess {
             setState(.starting)
             startHealthPolling()
         } catch {
-            NSLog("LocalFlow: Engine-Start fehlgeschlagen: %@", String(describing: error))
+            DevLog.log("EngineProcess: ✗ Start fehlgeschlagen: \(error)")
             setState(.crashed)
         }
     }

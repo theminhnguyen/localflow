@@ -10,10 +10,15 @@ targets:
       - path: LocalFlow
     settings:
       base:
-        # .dev-Suffix während der Entwicklung: die fertige Python-App (echte
+        # -Dev/.dev während der Entwicklung: die fertige Python-App (echte
         # Bundle-ID studio.minh.localflow) bleibt parallel unberührt nutzbar.
-        # Sobald die Swift-Hülle die Python-App ersetzt (Phase 3.4), wird hier
-        # auf "studio.minh.localflow" umgestellt.
+        # Der abweichende PRODUCT_NAME ist wichtig: hieße das Bundle ebenfalls
+        # "LocalFlow.app", würde die Diagnose der Python-App es als doppelte
+        # Kopie melden (mdfind sucht nach Dateinamen) und im Prozess-Monitor
+        # wären beide nicht auseinanderzuhalten.
+        # Beides wird in Phase 3.4 auf LocalFlow / studio.minh.localflow
+        # umgestellt, sobald die Swift-Hülle die Python-App ablöst.
+        PRODUCT_NAME: LocalFlow-Dev
         PRODUCT_BUNDLE_IDENTIFIER: studio.minh.localflow.dev
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
