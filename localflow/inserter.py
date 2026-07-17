@@ -116,10 +116,89 @@ def _wait_modifiers_clear(timeout: float = 4.0) -> None:
     log.debug("Modifier nach %.1fs immer noch gedrückt — füge trotzdem ein", timeout)
 
 
+# ---- Leerzeichen zwischen aufeinanderfolgenden Diktaten ----
+#
+# Diktiert man zweimal hintereinander in dieselbe Zeile, klebten die Texte
+# sonst aneinander ("HalloWie geht's") — cleanup.clean() strippt den Text ja.
+# Statt blind ein Leerzeichen davorzusetzen (das gäbe am Zeilenanfang eine
+# Einrückung), fragen wir die Ziel-App über die Bedienungshilfen-Schnittstelle
+# nach dem Zeichen direkt vor dem Cursor. Gibt sie keine Auskunft (manche Apps
+# tun das nicht), bleibt es beim alten Verhalten ohne Leerzeichen.
+
+def char_before_cursor():
+    """Zeichen unmittelbar vor dem Cursor im fokussierten Textfeld.
+
+    None, wenn der Cursor am Anfang steht oder die App keine Auskunft gibt.
+    """
+    try:
+        from ApplicationServices import (
+            AXUIElementCopyAttributeValue,
+            AXUIElementCopyParameterizedAttributeValue,
+            AXUIElementCreateSystemWide,
+            AXValueCreate,
+            AXValueGetValue,
+            kAXFocusedUIElementAttribute,
+            kAXSelectedTextRangeAttribute,
+            kAXStringForRangeParameterizedAttribute,
+            kAXValueTypeCFRange,
+        )
+        from CoreFoundation import CFRange
+    except ImportError:
+        log.debug("ApplicationServices nicht verfügbar")
+        return None
+
+    try:
+        system = AXUIElementCreateSystemWide()
+        err, focused = AXUIElementCopyAttributeValue(
+            system, kAXFocusedUIElementAttribute, None)
+        if err or focused is None:
+            return None
+
+        err, range_value = AXUIElementCopyAttributeValue(
+            focused, kAXSelectedTextRangeAttribute, None)
+        if err or range_value is None:
+            return None
+
+        # pyobjc liefert (ok, (location, length))
+        ok, cursor = AXValueGetValue(range_value, kAXValueTypeCFRange, None)
+        if not ok:
+            return None
+        location = cursor[0]
+        if location <= 0:
+            return None  # Feld-/Zeilenanfang -> kein Leerzeichen
+
+        # Gezielt EIN Zeichen lesen statt den ganzen Feldinhalt (in langen
+        # Dokumenten wäre das unnötig teuer).
+        one = AXValueCreate(kAXValueTypeCFRange, CFRange(location - 1, 1))
+        err, previous = AXUIElementCopyParameterizedAttributeValue(
+            focused, kAXStringForRangeParameterizedAttribute, one, None)
+        if err or not previous:
+            return None
+        return previous[0]
+    except Exception:
+        log.debug("Cursor-Kontext nicht lesbar", exc_info=True)
+        return None
+
+
+def needs_leading_space(text: str, previous_char=None) -> bool:
+    """Braucht text ein Leerzeichen davor, damit er nicht am Vorigen klebt?
+
+    previous_char nur für Tests; sonst wird der Cursor-Kontext gelesen.
+    """
+    if not text or text[0] in ",.!?;:":
+        return False  # vor Satzzeichen gehört nie ein Leerzeichen
+    previous = char_before_cursor() if previous_char is None else previous_char
+    if not previous:
+        return False
+    return not previous.isspace()
+
+
 def insert_text(text: str, mode: str = "paste") -> bool:
     """Fügt text in die aktive App ein. True bei Erfolg."""
     if not text:
         return False
+    if needs_leading_space(text):
+        text = " " + text
     if mode == "type":
         return _insert_by_typing(text)
     return _insert_by_paste(text)

@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.6.0] — 2026-07-17
+
+### Added
+- **Leerzeichen zwischen aufeinanderfolgenden Diktaten.** Diktierte man zweimal
+  hintereinander in dieselbe Zeile, klebten die Texte aneinander
+  („HalloWie geht's"). LocalFlow fragt jetzt über die Bedienungshilfen-
+  Schnittstelle das Zeichen direkt vor dem Cursor ab und setzt nur dann ein
+  Leerzeichen, wenn dort wirklich Text steht — am Zeilenanfang und nach einem
+  Absatz bleibt es aus, vor Satzzeichen („, oder?") ebenfalls. Gibt die Ziel-App
+  keine Auskunft, bleibt es beim bisherigen Verhalten. Gilt auch fürs
+  iPhone-Diktat, das denselben Einfügeweg nutzt.
+
 ## [0.5.4] — 2026-07-15
 
 ### Fixed
