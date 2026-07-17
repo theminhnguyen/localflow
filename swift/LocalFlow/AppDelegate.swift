@@ -1,12 +1,13 @@
 import Cocoa
 import AVFoundation
 
+/// Menüleiste und App-Leben. Die Diktier-Logik steckt im FlowController, der
+/// Python-Dienst im EngineProcess — analog zur Trennung menubar.py / main.py.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let engine = EngineProcess()
-    private let recorder = Recorder()
-    private var hotkey: HotkeyTap?
-    private var engineReady = false
+    private let flow = FlowController()
+    private var status = "Startet Engine…"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // kein Dock-Icon (Menüleisten-App)
@@ -16,8 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.title = "🎙️"
+        render()
 
-        render(status: "Startet Engine…")
         engine.start { [weak self] state in
             self?.handleEngineState(state)
         }
@@ -25,10 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestInputMonitoringIfNeeded()
         requestAccessibilityIfNeeded()
 
-        hotkey = HotkeyTap(key: HotkeyKey.configured(),
-                            onPress: { [weak self] in self?.onHotkeyPress() },
-                            onRelease: { [weak self] in self?.onHotkeyRelease() })
-        hotkey?.start()
+        flow.onStatus = { [weak self] text in
+            self?.status = text
+            self?.render()
+        }
+        flow.start()
 
         // Explizit anfragen statt auf den ersten Aufnahme-Versuch zu warten —
         // sonst taucht die App erst in den Systemeinstellungen auf, nachdem der
@@ -39,10 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        recorder.stop()
-        hotkey?.stop()
+        flow.stop()
         engine.stop()
     }
+
+    // ---- Berechtigungen ----
 
     /// Löst den System-Dialog für Eingabemonitoring aus, wenn die Berechtigung
     /// fehlt (Gegenstück zu hotkey.request_permissions() auf der Python-Seite).
@@ -83,82 +86,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleEngineState(_ state: EngineProcess.State) {
         switch state {
         case .stopped:
-            engineReady = false
-            render(status: "Gestoppt")
+            flow.engineReady = false
+            status = "Gestoppt"
         case .starting:
-            engineReady = false
-            render(status: "Startet Engine…")
+            flow.engineReady = false
+            status = "Startet Engine…"
         case .running:
-            engineReady = true
+            flow.engineReady = true
             DevLog.log("Engine bereit")
-            render(status: "Bereit")
+            status = "Bereit"
         case .crashed:
-            engineReady = false
+            flow.engineReady = false
             DevLog.log("Engine abgestürzt")
-            render(status: "Fehler — siehe ~/.localflow/logs/swift-dev.log")
+            status = "Fehler — siehe Log"
         }
-    }
-
-    // ---- Diktat-Ablauf (Hotkey-Callbacks) ----
-
-    private func onHotkeyPress() {
-        DevLog.log("onHotkeyPress (engineReady=\(engineReady) recording=\(recorder.isRecording))")
-        guard engineReady, !recorder.isRecording else { return }
-        do {
-            try recorder.start()
-            render(status: "Nimmt auf…")
-        } catch {
-            DevLog.log("Mikrofon-Start fehlgeschlagen: \(error)")
-            render(status: "Mikrofon-Fehler — Berechtigung prüfen")
-        }
-    }
-
-    private func onHotkeyRelease() {
-        DevLog.log("onHotkeyRelease")
-        guard let url = recorder.stop() else {
-            DevLog.log("stop() lieferte keine Datei (Aufnahme lief nicht)")
-            return
-        }
-        render(status: "Verarbeitet…")
-        LocalFlowAPI.shared.transcribe(fileURL: url) { [weak self] result in
-            try? FileManager.default.removeItem(at: url)
-            switch result {
-            case .success(let r):
-                DevLog.log("Transkription ok: \"\(r.text)\"")
-                guard !r.text.isEmpty else {
-                    self?.flash(status: "Bereit")
-                    return
-                }
-                // Paster blockiert (wartet auf losgelassene Modifier) -> nicht auf den
-                // Haupt-Thread legen, sonst friert die Menüleiste ein.
-                let inserted = Paster.insert(r.text)
-                DevLog.log("Einfügen: \(inserted ? "ok" : "fehlgeschlagen")")
-                self?.flash(status: inserted ? "Eingefügt ✓" : "In der Zwischenablage (⌘V)")
-            case .failure(let error):
-                DevLog.log("Transkription fehlgeschlagen: \(error)")
-                self?.flash(status: "Fehler beim Diktieren")
-            }
-        }
-    }
-
-    /// Kurze Rückmeldung im Menü, danach zurück auf den Normalstatus.
-    private func flash(status: String) {
-        DispatchQueue.main.async {
-            self.render(status: status)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                self.render(status: self.engineReady ? "Bereit" : "Startet Engine…")
-            }
-        }
+        render()
     }
 
     // ---- Menü ----
 
-    private func render(status: String) {
+    private func render() {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "LocalFlow — \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Beenden", action: #selector(quit), keyEquivalent: "q", target: self)
+        menu.addItem(withTitle: "⚙️ Einstellungen im Browser öffnen…",
+                     action: #selector(openSettings), target: self)
+        let copyItem = menu.addItem(withTitle: "📋 Letzten Text kopieren",
+                                     action: #selector(copyLastText), target: self)
+        copyItem.isEnabled = flow.lastText != nil
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "🩺 Log öffnen", action: #selector(openLog), target: self)
+        menu.addItem(withTitle: "Beenden", action: #selector(quit),
+                     keyEquivalent: "q", target: self)
         statusItem.menu = menu
+    }
+
+    /// Die vorhandene Web-Einstellungsseite der Engine (Paket 2.2) — 127.0.0.1,
+    /// weil deren Zertifikat diese Adresse immer abdeckt. Token als Fragment
+    /// ("#k="), damit es in keinem Zugriffs-Log landet (siehe menubar._url()).
+    @objc private func openSettings() {
+        guard let token = LocalFlowToken.current else {
+            DevLog.log("Kein Kopplungs-Token gefunden — Einstellungen nicht erreichbar")
+            return
+        }
+        let url = "https://127.0.0.1:\(EngineProcess.defaultPort)/settings#k=\(token)"
+        NSWorkspace.shared.open(URL(string: url)!)
+    }
+
+    @objc private func copyLastText() {
+        guard let text = flow.lastText else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    @objc private func openLog() {
+        NSWorkspace.shared.open(DevLog.fileURL)
     }
 
     @objc private func quit() {
@@ -168,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 private extension NSMenu {
     @discardableResult
-    func addItem(withTitle title: String, action: Selector, keyEquivalent: String,
+    func addItem(withTitle title: String, action: Selector, keyEquivalent: String = "",
                  target: AnyObject) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         item.target = target

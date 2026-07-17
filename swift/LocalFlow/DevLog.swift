@@ -7,7 +7,7 @@ import Foundation
 /// Debuggen entsprechend nutzlos. Die Python-Seite loggt aus demselben Grund
 /// ebenfalls in eine eigene Datei (siehe localflow/main.py `_setup_logging`).
 enum DevLog {
-    private static let url: URL = {
+    static let fileURL: URL = {
         let dir = URL(fileURLWithPath: NSHomeDirectory() + "/.localflow/logs")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("swift-dev.log")
@@ -25,12 +25,12 @@ enum DevLog {
         let line = "\(formatter.string(from: Date())) \(message)\n"
         queue.async {
             guard let data = line.data(using: .utf8) else { return }
-            if let handle = try? FileHandle(forWritingTo: url) {
+            if let handle = try? FileHandle(forWritingTo: fileURL) {
                 handle.seekToEndOfFile()
                 handle.write(data)
                 try? handle.close()
             } else {
-                try? data.write(to: url)
+                try? data.write(to: fileURL)
             }
         }
     }
