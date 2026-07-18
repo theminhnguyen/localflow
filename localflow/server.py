@@ -175,6 +175,15 @@ def create_app(engine, get_language, controller=None) -> Flask:
                        insert_allowed=bool(c.get("phone_insert", True)),
                        history_allowed=bool(c.get("share_history", True)))
 
+    @app.post("/api/prewarm")
+    def prewarm():
+        # Wird von der Swift-Hülle beim Tastendruck gefeuert (fire-and-forget):
+        # wärmt ausgekühlte GPU-Kernel im Hintergrund vor, während der Nutzer
+        # spricht, damit die folgende Transkription nicht den Kalt-Aufschlag
+        # zahlt. No-op, wenn die Engine noch heiß ist (siehe engine.prewarm_if_cold).
+        engine.prewarm_if_cold()
+        return jsonify(ok=True)
+
     @app.get("/api/history")
     def history():
         if not cfg().get("share_history", True):
@@ -253,13 +262,25 @@ def create_app(engine, get_language, controller=None) -> Flask:
     def insert():
         # Für die Swift-Hülle (Phase 3): Fallback, falls das native Einfügen dort
         # mal nicht greift — Python macht es dann über den bewährten Weg.
+        #
+        # Der phone_insert-Schalter ("Handy darf einfügen") gilt hier genauso
+        # wie im /api/transcribe-Pfad — SONST kann ihn jedes Gerät im WLAN mit
+        # gültigem Token umgehen, obwohl der Nutzer ihn bewusst ausgeschaltet
+        # hat. Ausnahme: Aufrufe von diesem Mac selbst (127.0.0.1/::1) — das
+        # ist die Swift-Hülle, kein "Handy", und soll immer einfügen dürfen.
+        c = cfg()
+        is_local = request.remote_addr in ("127.0.0.1", "::1")
+        if not is_local and not c.get("phone_insert", True):
+            return jsonify(error="Einfügen vom Handy ist ausgeschaltet",
+                           code="insert_disabled"), 403
+
         data = request.get_json(silent=True) or {}
         text = data.get("text", "")
         if not isinstance(text, str) or not text.strip():
             return jsonify(error="Feld 'text' fehlt oder ist leer"), 400
         from .inserter import insert_text
 
-        inserted = insert_text(text, cfg().get("insert_mode", "paste"))
+        inserted = insert_text(text, c.get("insert_mode", "paste"))
         return jsonify(ok=True, inserted=inserted)
 
     @app.post("/api/transcribe")

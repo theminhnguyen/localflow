@@ -22,9 +22,15 @@ class FakeEngine:
     loaded = True
     repo = "fake-model"
 
+    def __init__(self):
+        self.prewarm_calls = 0
+
     def transcribe(self, audio, language=None, prompt_terms=None):
         return {"text": "Hallo vom Handy.", "language": "de",
                 "seconds": round(len(audio) / SAMPLE_RATE, 2), "ms": 10}
+
+    def prewarm_if_cold(self):
+        self.prewarm_calls += 1
 
 
 class FakeController:
@@ -102,6 +108,19 @@ def test_ping_reports_flags(client):
     assert c.get("/api/ping").get_json()["insert_allowed"] is False
 
 
+def test_prewarm_endpoint_triggers_engine(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "secret.token")
+    cfg = dict(config.DEFAULT_CONFIG)
+    cfg["require_auth"] = False
+    engine = FakeEngine()
+    app = create_app(engine, lambda: "de", controller=FakeController(cfg))
+    app.config["TESTING"] = True
+    r = app.test_client().post("/api/prewarm")
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert engine.prewarm_calls == 1
+
+
 def test_transcribe_and_history(client):
     c, ctrl = client
     r = c.post("/api/transcribe", data={
@@ -175,6 +194,49 @@ def test_api_insert_requires_auth(auth_client, monkeypatch):
     assert r.status_code == 401
     r = c.post("/api/insert", json={"text": "x"}, headers={"X-LocalFlow-Key": token})
     assert r.status_code == 200
+
+
+def test_api_insert_remote_respects_phone_insert_off(client, monkeypatch):
+    # Entferntes Gerät (Handy) + Schalter aus -> verweigert. Ohne diese Prüfung
+    # konnte /api/insert den phone_insert-Schalter umgehen (siehe /api/transcribe,
+    # das ihn schon immer respektiert hatte).
+    c, ctrl = client
+    ctrl.cfg["phone_insert"] = False
+    import localflow.inserter as ins
+
+    calls = []
+    monkeypatch.setattr(ins, "insert_text", lambda t, m="paste": (calls.append(t), True)[1])
+    r = c.post("/api/insert", json={"text": "x"},
+               environ_base={"REMOTE_ADDR": "192.168.1.50"})
+    assert r.status_code == 403
+    assert r.get_json()["code"] == "insert_disabled"
+    assert calls == []
+
+
+def test_api_insert_remote_allowed_when_phone_insert_on(client, monkeypatch):
+    c, ctrl = client
+    ctrl.cfg["phone_insert"] = True
+    import localflow.inserter as ins
+
+    monkeypatch.setattr(ins, "insert_text", lambda t, m="paste": True)
+    r = c.post("/api/insert", json={"text": "x"},
+               environ_base={"REMOTE_ADDR": "192.168.1.50"})
+    assert r.status_code == 200
+
+
+def test_api_insert_local_ignores_phone_insert_off(client, monkeypatch):
+    # Die Swift-Hülle läuft auf demselben Mac und ist kein "Handy" — sie soll
+    # unabhängig vom phone_insert-Schalter einfügen dürfen.
+    c, ctrl = client
+    ctrl.cfg["phone_insert"] = False
+    import localflow.inserter as ins
+
+    calls = []
+    monkeypatch.setattr(ins, "insert_text", lambda t, m="paste": (calls.append(t), True)[1])
+    r = c.post("/api/insert", json={"text": "x"},
+               environ_base={"REMOTE_ADDR": "127.0.0.1"})
+    assert r.status_code == 200
+    assert calls == ["x"]
 
 
 def test_silence_returns_empty(client):
