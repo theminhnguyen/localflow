@@ -193,6 +193,58 @@ def needs_leading_space(text: str, previous_char=None) -> bool:
     return not previous.isspace()
 
 
+# ---- Zwischenablage-Wiederherstellung: abbrechbar, überlebt Serien-Diktate ----
+#
+# Nach dem Einfügen wird die vorige Zwischenablage nach 0,6s wiederhergestellt.
+# Folgt ein zweites Diktat INNERHALB dieser 0,6s (Serien-Diktate — genau der
+# Fall, für den main.py eine Warteschlange hat), konnte der Restore von Diktat 1
+# GENAU zwischen "Zwischenablage = Text 2" und dem ⌘V feuern: eingefügt wurde
+# dann die alte Zwischenablage statt Text 2. Ein threading.Timer statt Thread+
+# sleep lässt sich abbrechen; wichtig ist zusätzlich, beim Abbrechen NICHT den
+# aktuell sichtbaren Inhalt (= Text 1, der Diktattext) als "wiederherzustellen"
+# zu übernehmen, sondern den zuvor gemerkten — sonst landet nach der Serie
+# Diktattext in der Zwischenablage statt des ursprünglichen Inhalts.
+_restore_timer: threading.Timer | None = None
+_restore_value: str | None = None
+_restore_lock = threading.Lock()
+
+
+def _capture_old_clipboard() -> str:
+    """Zwischenablage-Inhalt, der nach Ende der Diktier-Serie wiederhergestellt
+    werden soll. Läuft bereits ein Restore-Timer (Serien-Diktat), gilt dessen
+    gemerkter Wert weiter — nicht der aktuell sichtbare Inhalt (das wäre der
+    zuletzt eingefügte Diktattext, nicht der ursprüngliche)."""
+    global _restore_timer, _restore_value
+    with _restore_lock:
+        if _restore_timer is not None:
+            _restore_timer.cancel()
+            _restore_timer = None
+            return _restore_value or ""
+    return _pbpaste()
+
+
+def _schedule_restore(old: str) -> None:
+    global _restore_timer, _restore_value
+
+    def do_restore():
+        global _restore_timer
+        with _restore_lock:
+            _restore_timer = None
+        try:
+            _pbcopy(old)
+        except Exception:
+            pass
+
+    with _restore_lock:
+        if _restore_timer is not None:
+            _restore_timer.cancel()
+        _restore_value = old
+        t = threading.Timer(0.6, do_restore)
+        t.daemon = True
+        _restore_timer = t
+        t.start()
+
+
 def insert_text(text: str, mode: str = "paste") -> bool:
     """Fügt text in die aktive App ein. True bei Erfolg."""
     if not text:
@@ -205,7 +257,7 @@ def insert_text(text: str, mode: str = "paste") -> bool:
 
 
 def _insert_by_paste(text: str) -> bool:
-    old = _pbpaste()
+    old = _capture_old_clipboard()
     try:
         _pbcopy(text)
         time.sleep(0.05)  # Clipboard-Sync abwarten
@@ -214,19 +266,12 @@ def _insert_by_paste(text: str) -> bool:
     except subprocess.CalledProcessError as e:
         log.error("Einfügen fehlgeschlagen (Bedienungshilfen-Berechtigung fehlt?): %s",
                   e.stderr.decode() if e.stderr else e)
-        # Text bleibt in der Zwischenablage, damit nichts verloren geht
+        # Text bleibt in der Zwischenablage, damit nichts verloren geht —
+        # kein Restore mehr geplant (bewusst, wie bisher).
         return False
 
-    # Zwischenablage erst nach dem Paste wiederherstellen (verzögert, nicht blockierend)
-    def restore():
-        time.sleep(0.6)
-        try:
-            _pbcopy(old)
-        except Exception:
-            pass
-
     if old:
-        threading.Thread(target=restore, daemon=True).start()
+        _schedule_restore(old)
     return True
 
 

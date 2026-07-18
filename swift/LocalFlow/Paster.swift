@@ -12,18 +12,62 @@ import ApplicationServices
 /// Die Swift-Hülle besitzt die Rechte und ist ohnehin die richtige Stelle dafür
 /// (siehe docs/PLAN-PROFESSIONALISIERUNG.md, Phase 3).
 enum Paster {
+    // ---- Zwischenablage-Wiederherstellung: abbrechbar, überlebt Serien-Diktate ----
+    //
+    // Nach dem Einfügen wird die vorige Zwischenablage nach 0,6s wiederhergestellt.
+    // Folgt ein zweites Diktat INNERHALB dieser 0,6s (Serien-Diktate — genau der
+    // Fall, für den FlowController einen seriellen Worker hat), konnte der Restore
+    // von Diktat 1 GENAU zwischen "Zwischenablage = Text 2" und dem ⌘V feuern:
+    // eingefügt wurde dann die alte Zwischenablage statt Text 2. Ein abbrechbares
+    // DispatchWorkItem statt eines nackten asyncAfter-Blocks löst das — wichtig
+    // ist zusätzlich, beim Abbrechen NICHT den aktuell sichtbaren Inhalt (=
+    // Diktattext 1) als "wiederherzustellen" zu übernehmen, sondern den zuvor
+    // gemerkten ursprünglichen Wert (analog localflow/inserter.py).
+    private struct PendingRestore {
+        let workItem: DispatchWorkItem
+        let value: String
+    }
+    private static var pending: PendingRestore?
+    private static let restoreLock = NSLock()
+
+    private static func captureOldClipboard() -> String? {
+        restoreLock.lock()
+        defer { restoreLock.unlock() }
+        if let p = pending {
+            p.workItem.cancel()
+            pending = nil
+            return p.value
+        }
+        return NSPasteboard.general.string(forType: .string)
+    }
+
+    private static func scheduleRestore(_ value: String) {
+        restoreLock.lock()
+        pending?.workItem.cancel()
+        let item = DispatchWorkItem {
+            restoreLock.lock()
+            pending = nil
+            restoreLock.unlock()
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(value, forType: .string)
+        }
+        pending = PendingRestore(workItem: item, value: value)
+        restoreLock.unlock()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6, execute: item)
+    }
+
     /// Muss AUSSERHALB des Haupt-Threads laufen — wartet ggf. sekundenlang auf
     /// losgelassene Modifier-Tasten.
     static func insert(_ text: String) -> Bool {
         guard !text.isEmpty else { return false }
 
         let payload = needsLeadingSpace(before: text) ? " " + text : text
-
-        let pb = NSPasteboard.general
-        let previous = pb.string(forType: .string)
+        let previous = captureOldClipboard()
 
         // NSPasteboard statt pbcopy: Über die Kommandozeilen-Werkzeuge kamen
         // Umlaute in der Ziel-App als Mojibake an (siehe CHANGELOG 0.5.4).
+        let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(payload, forType: .string)
         Thread.sleep(forTimeInterval: 0.05)  // Zwischenablage sicher übernommen
@@ -33,16 +77,12 @@ enum Paster {
         guard postCmdV() else {
             DevLog.log("Paster: ⌘V fehlgeschlagen — Bedienungshilfen-Berechtigung fehlt. "
                 + "Text liegt in der Zwischenablage (⌘V von Hand).")
+            // Kein Restore mehr geplant (bewusst, wie bisher) — Text bleibt stehen.
             return false
         }
 
-        // Verzögert wiederherstellen, damit das Einfügen sicher durch ist.
-        if let previous = previous {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(previous, forType: .string)
-            }
+        if let previous = previous, !previous.isEmpty {
+            scheduleRestore(previous)
         }
         return true
     }
