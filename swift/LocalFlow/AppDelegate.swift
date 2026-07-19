@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleEngineState(state)
         }
 
+        // Vor den Berechtigungs-Dialogen zeigen, nicht danach — sonst poppen
+        // die System-Dialoge scheinbar aus dem Nichts auf.
+        Onboarding.showIfNeeded()
+
         requestInputMonitoringIfNeeded()
         requestAccessibilityIfNeeded()
 
