@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let engine = EngineProcess()
     private let flow = FlowController()
     private var status = "Startet Engine…"
+    private var engineState: EngineProcess.State = .starting
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // kein Dock-Icon (Menüleisten-App)
@@ -84,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // ---- Engine-Status ----
 
     private func handleEngineState(_ state: EngineProcess.State) {
+        engineState = state
         switch state {
         case .stopped:
             flow.engineReady = false
@@ -115,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      action: #selector(copyLastText), target: self)
         copyItem.isEnabled = flow.lastText != nil
         menu.addItem(NSMenuItem.separator())
+        // Nur sichtbar, wenn die automatischen Neustart-Versuche aufgegeben haben
+        // (EngineProcess.restartDelays ausgeschöpft) — sonst versucht die Engine
+        // es ohnehin gerade selbst im Hintergrund erneut.
+        if engineState == .crashed {
+            menu.addItem(withTitle: "🔄 Engine neu starten", action: #selector(restartEngine),
+                        target: self)
+        }
         menu.addItem(withTitle: "🩺 Log öffnen", action: #selector(openLog), target: self)
         menu.addItem(withTitle: "Beenden", action: #selector(quit),
                      keyEquivalent: "q", target: self)
@@ -142,6 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openLog() {
         NSWorkspace.shared.open(DevLog.fileURL)
+    }
+
+    @objc private func restartEngine() {
+        DevLog.log("Manueller Engine-Neustart über das Menü")
+        status = "Startet Engine…"
+        render()
+        engine.restart()
     }
 
     @objc private func quit() {
