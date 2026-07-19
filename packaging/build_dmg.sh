@@ -1,6 +1,15 @@
 #!/bin/bash
-# Baut LocalFlow.app (PyInstaller) und packt es in eine Drag-and-drop-DMG.
-# Aufruf vom Repo-Wurzelverzeichnis:  bash packaging/build_dmg.sh
+# Baut LocalFlow.app (Swift-Hülle + gebündelte Python-Engine) und packt es in
+# eine Drag-and-drop-DMG. Aufruf vom Repo-Wurzelverzeichnis:
+#   bash packaging/build_dmg.sh
+#
+# Seit Phase 3.4: die Swift-App (swift/) ist die Produktions-App, sie startet
+# die Python-Engine (packaging/LocalFlow.spec, Ziel "LocalFlow-Engine") als
+# gebündelten Kindprozess aus Contents/Resources/engine/ — siehe
+# EngineProcess.swift. Die alte, rein-pythonische Menüleisten-App (Ziel
+# "LocalFlow" in derselben Spec-Datei) wird hier nicht mehr gebaut; das letzte
+# Release vor dieser Umstellung bleibt als DMG unter ~/Downloads/ liegen und
+# dient bei Bedarf als manueller Rollback.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -15,38 +24,59 @@ fi
 
 # Zentrale Versionsquelle: localflow/__init__.py (NICHT hier hardcoden)
 VERSION="$("$PY" -c 'from localflow import __version__; print(__version__)')"
-APP="dist/LocalFlow.app"
+ENGINE_DIST="dist/LocalFlow-Engine"
+APP="swift/build/Build/Products/Release/LocalFlow.app"
 DMG="dist/LocalFlow-${VERSION}.dmg"
 
-echo "▸ 1/4  PyInstaller-Build (Python: $PY)…"
-# Etwaige laufende Test-Instanz beenden (hält sonst Dateien im dist/ offen)
-pkill -9 -f "dist/LocalFlow" 2>/dev/null || true
+echo "▸ 1/6  PyInstaller-Engine bauen (Python: $PY)…"
+# Etwaige laufende Test-Instanzen beenden (halten sonst Dateien offen)
+pkill -9 -f "dist/LocalFlow-Engine" 2>/dev/null || true
+pkill -9 -f "LocalFlow.app/Contents/Resources/engine" 2>/dev/null || true
 sleep 1
 rm -rf build dist
-# "-m PyInstaller" statt des "pyinstaller"-Kommandos: funktioniert unabhängig
-# davon, ob PyInstaller in einem venv/bin oder systemweit installiert ist.
 "$PY" -m PyInstaller packaging/LocalFlow.spec --noconfirm --clean \
   --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1
-[ -d "$APP" ] || { echo "✗ Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; tail -40 /tmp/pyinstaller.log; exit 1; }
+[ -d "$ENGINE_DIST" ] || { echo "✗ Engine-Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; tail -40 /tmp/pyinstaller.log; exit 1; }
+
+echo "▸ 2/6  Swift-App bauen (Release)…"
+command -v xcodegen >/dev/null || { echo "✗ xcodegen fehlt (brew install xcodegen)"; exit 1; }
+pkill -9 -f "LocalFlow.app/Contents/MacOS/LocalFlow" 2>/dev/null || true
+sleep 1
+rm -rf swift/build
+(cd swift && xcodegen generate)
+xcodebuild -project swift/LocalFlow.xcodeproj -scheme LocalFlow -configuration Release \
+  -derivedDataPath swift/build build >/tmp/xcodebuild.log 2>&1
+[ -d "$APP" ] || { echo "✗ Swift-Build fehlgeschlagen — siehe /tmp/xcodebuild.log"; tail -60 /tmp/xcodebuild.log; exit 1; }
+
+echo "▸ 3/6  Engine ins Bundle kopieren…"
+# EngineProcess.swift sucht die Engine unter Contents/Resources/engine/ per
+# Bundle.main.url(forResource:"LocalFlow-Engine", subdirectory:"engine") —
+# das PyInstaller-onedir-Layout (Binary + _internal/ als Geschwister) bleibt
+# dabei unverändert erhalten, nur an einen anderen Ort kopiert.
+rm -rf "$APP/Contents/Resources/engine"
+mkdir -p "$APP/Contents/Resources/engine"
+cp -R "$ENGINE_DIST"/. "$APP/Contents/Resources/engine/"
 
 # Stabile Signatur bevorzugen: mit ihr überleben die macOS-Berechtigungen jedes
 # Update (Designated Requirement = Bundle-ID + Zertifikat, siehe setup_signing.sh).
-# Ist der Signatur-Schlüsselbund nicht eingerichtet (z.B. frischer CI-Runner),
-# fällt es sauber auf ad-hoc zurück.
+# --deep signiert dabei auch die frisch hineinkopierten Engine-Binaries neu,
+# sodass am Ende alles unter derselben Identität steht. Ist der Signatur-
+# Schlüsselbund nicht eingerichtet (z.B. frischer CI-Runner), fällt es sauber
+# auf ad-hoc zurück.
 SIGN_IDENTITY="LocalFlow Code Signing"
 SIGN_KC="$HOME/Library/Keychains/localflow-signing.keychain-db"
 SIGN_KC_PASS_FILE="packaging/signing/.keychain_pass"
 if [ -f "$SIGN_KC" ] && [ -f "$SIGN_KC_PASS_FILE" ] && security find-identity -p codesigning "$SIGN_KC" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-  echo "▸ 2/4  Signieren mit stabiler Identität ('$SIGN_IDENTITY')…"
+  echo "▸ 4/6  Signieren mit stabiler Identität ('$SIGN_IDENTITY')…"
   security unlock-keychain -p "$(cat "$SIGN_KC_PASS_FILE")" "$SIGN_KC" 2>/dev/null || true
   codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$SIGN_KC" "$APP" >/dev/null 2>&1 \
     || codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 else
-  echo "▸ 2/4  Ad-hoc-Signierung (stabile Identität nicht eingerichtet)…"
+  echo "▸ 4/6  Ad-hoc-Signierung (stabile Identität nicht eingerichtet)…"
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 fi
 
-echo "▸ 3/4  DMG-Layout vorbereiten…"
+echo "▸ 5/6  DMG-Layout vorbereiten…"
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/LocalFlow.app"
 ln -s /Applications "$STAGE/Applications"       # Ziel für Drag-and-drop
@@ -72,7 +102,7 @@ if [ -f "$BG_SRC" ]; then
   HAVE_BG=1
 fi
 
-echo "▸ 4/4  DMG erstellen…"
+echo "▸ 6/6  DMG erstellen…"
 rm -f "$DMG"
 
 if [ "$HAVE_BG" = "1" ] && [ "$(uname)" = "Darwin" ]; then
@@ -125,15 +155,16 @@ else
 fi
 rm -rf "$STAGE"
 
-# Gebaute .app aus dist/ entfernen — sie steckt jetzt in der DMG.
+# Gebaute .app aus swift/build/ entfernen — sie steckt jetzt in der DMG.
 #
 # WARUM: macOS bindet Bedienungshilfen-/Eingabemonitoring-Rechte bei ad-hoc
-# signierten Apps an den DATEIPFAD. Bliebe dist/LocalFlow.app liegen, gäbe es
+# signierten Apps an den DATEIPFAD. Bliebe eine gebaute Kopie liegen, gäbe es
 # ZWEI "LocalFlow"-Einträge in den Systemeinstellungen — der Nutzer setzt das
 # Häkchen bei der einen, startet aber die andere, und die Rechte "gehen wieder
-# aus". Genau dieser Bug wurde am 2026-07-14 gemeldet.
-rm -rf "$APP" dist/LocalFlow
+# aus". Genau dieser Bug wurde am 2026-07-14 gemeldet (damals mit der reinen
+# Python-App, gilt aber unverändert für die Swift-Hülle).
+rm -rf swift/build dist/LocalFlow-Engine
 
 SIZE="$(du -h "$DMG" | cut -f1)"
 echo "✅ Fertig: $DMG  ($SIZE)"
-echo "   (dist/LocalFlow.app entfernt — verhindert doppelte Berechtigungs-Einträge)"
+echo "   (Build-Ordner entfernt — verhindert doppelte Berechtigungs-Einträge)"

@@ -6,4 +6,4 @@ sie ist die zentrale Versionsquelle und wird u.a. von packaging/build_dmg.sh per
 App-Importkette (und damit Sekunden an Ladezeit) mitzuschleppen.
 """
 
-__version__ = "0.6.1"
+__version__ = "1.0.0"

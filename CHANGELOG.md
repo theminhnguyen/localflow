@@ -6,6 +6,21 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [1.0.0] — 2026-07-19
+
+### Changed
+- **Native Swift-App löst die reine Python-Menüleisten-App ab.** LocalFlow
+  läuft jetzt als echte, kleine Swift-App (Menüleiste, Hotkey, Aufnahme,
+  Einfügen), die Whisper/Cleanup/KI-Feinschliff weiterhin über eine
+  gebündelte, gleich mitgelieferte Python-Engine erledigt — für dich als
+  Nutzer:in ändert sich an der Bedienung nichts (gleiche Bundle-Identität,
+  gleicher Port, gleiche Systemrechte). Grund: spürbar schnellerer Start,
+  robusteres Hotkey-Handling, natives macOS-Verhalten (z. B. Autostart über
+  die offizielle Login-Item-API statt eines selbstgebauten LaunchAgents).
+- Menü um Sprache-, Verlauf- und Diagnose-Status-Untermenüs ergänzt (volle
+  Parität zur bisherigen Python-Menüleiste), dazu QR-Kopplung, Datei-
+  Transkription und Update-Check nativ in der neuen App.
+
 ## [0.6.1] — 2026-07-19
 
 ### Added

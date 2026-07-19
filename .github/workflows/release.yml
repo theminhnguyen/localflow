@@ -34,6 +34,9 @@ jobs:
       - name: Tests (Sicherheitsnetz vor dem Release)
         run: python -m pytest tests/ -q --ignore=tests/test_e2e.py
 
+      - name: xcodegen installieren (Swift-App-Projekt, seit Phase 3.4)
+        run: brew install xcodegen
+
       - name: DMG bauen
         run: bash packaging/build_dmg.sh
 

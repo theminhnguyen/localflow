@@ -10,26 +10,21 @@ targets:
       - path: LocalFlow
     settings:
       base:
-        # -Dev/.dev während der Entwicklung: die fertige Python-App (echte
-        # Bundle-ID studio.minh.localflow) bleibt parallel unberührt nutzbar.
-        # Der abweichende PRODUCT_NAME ist wichtig: hieße das Bundle ebenfalls
-        # "LocalFlow.app", würde die Diagnose der Python-App es als doppelte
-        # Kopie melden (mdfind sucht nach Dateinamen) und im Prozess-Monitor
-        # wären beide nicht auseinanderzuhalten.
-        # Beides wird in Phase 3.4 auf LocalFlow / studio.minh.localflow
-        # umgestellt, sobald die Swift-Hülle die Python-App ablöst.
-        PRODUCT_NAME: LocalFlow-Dev
-        PRODUCT_BUNDLE_IDENTIFIER: studio.minh.localflow.dev
-        MARKETING_VERSION: "0.1.0"
+        # Phase 3.4: echte Bundle-ID/Produktname — die Swift-Hülle IST jetzt
+        # die Produktions-App, kein paralleles -Dev-Bundle mehr nötig (die
+        # Python-App lief bis hierhin unter genau dieser Identität).
+        PRODUCT_NAME: LocalFlow
+        PRODUCT_BUNDLE_IDENTIFIER: studio.minh.localflow
+        MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "LocalFlow wandelt deine Sprache lokal in Text um."
         INFOPLIST_KEY_NSHumanReadableCopyright: "MIT — Minh Nguyen"
-        # Ad-hoc-Signatur: reicht für lokale Entwicklung inkl. Bedienungshilfen-
-        # Berechtigung (siehe packaging/setup_signing.sh für die stabile
-        # Release-Signatur, die in Phase 3.4 übernommen wird).
+        # Ad-hoc als Xcode-Default; build_dmg.sh signiert danach per Shell mit
+        # der stabilen Release-Identität nach (siehe packaging/setup_signing.sh),
+        # build_swift.sh macht dasselbe für lokale Testbuilds.
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: YES

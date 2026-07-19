@@ -9,11 +9,10 @@ final class EngineProcess {
         case stopped, starting, running, crashed
     }
 
-    // Eigener Port während der Entwicklung (siehe project.yml: .dev-Bundle-ID) —
-    // damit läuft die Swift-Test-App neben der echten Python-App (Port 8790)
-    // her, ohne dass sich beide um denselben Port streiten. Wechselt auf 8790,
-    // sobald die Swift-App die Python-App ersetzt (Phase 3.4).
-    static let defaultPort = 8799
+    // Derselbe Port, den vorher die Python-App belegte — die Swift-Hülle ist
+    // jetzt die Produktions-App (Phase 3.4), kein Grund mehr für einen
+    // eigenen Entwicklungs-Port.
+    static let defaultPort = 8790
 
     /// Backoff zwischen automatischen Neustart-Versuchen nach einem Absturz.
     /// Nach so vielen erfolglosen Versuchen IN FOLGE geben wir auf — das Menü
