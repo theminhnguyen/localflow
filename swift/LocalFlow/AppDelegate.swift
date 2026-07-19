@@ -1,5 +1,6 @@
 import Cocoa
 import AVFoundation
+import UniformTypeIdentifiers
 
 /// Menüleiste und App-Leben. Die Diktier-Logik steckt im FlowController, der
 /// Python-Dienst im EngineProcess — analog zur Trennung menubar.py / main.py.
@@ -185,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      action: #selector(toggleAutostart), target: self)
         autoItem.state = Autostart.enabled ? .on : .off
         menu.addItem(withTitle: "📱 Handy koppeln", submenu: pairingSubmenu())
+        menu.addItem(withTitle: "📄 Datei transkribieren…",
+                     action: #selector(transcribeFile), target: self)
         let copyItem = menu.addItem(withTitle: "📋 Letzten Text kopieren",
                                      action: #selector(copyLastText), target: self)
         copyItem.isEnabled = flow.lastText != nil
@@ -259,6 +262,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.qrWindowController?.showWindow(nil)
                 NSApp.activate(ignoringOtherApps: true)
                 self.qrWindowController?.window?.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    /// Beliebige Audio-/Videodatei transkribieren (Gegenstück zu
+    /// menubar._transcribe_file()): läuft über denselben /api/transcribe-
+    /// Endpunkt wie das Diktat, server.py.decode_upload() erkennt das Format
+    /// an der Dateiendung. Ergebnis landet wie in Python als "<Datei>.txt"
+    /// neben dem Original und wird mit der Standard-App dafür geöffnet.
+    @objc private func transcribeFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Audio- oder Videodatei transkribieren"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio, .movie]
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.runFileTranscription(url)
+        }
+    }
+
+    private func runFileTranscription(_ url: URL) {
+        LocalFlowAPI.shared.transcribe(fileURL: url, filename: url.lastPathComponent,
+                                        timeout: 300) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let transcribed):
+                    let outURL = URL(fileURLWithPath: url.path + ".txt")
+                    do {
+                        try transcribed.text.appending("\n").write(
+                            to: outURL, atomically: true, encoding: .utf8)
+                        NSWorkspace.shared.open(outURL)
+                        DevLog.log("Datei transkribiert: \(url.lastPathComponent) -> \(outURL.lastPathComponent)")
+                    } catch {
+                        DevLog.log("Textdatei konnte nicht geschrieben werden: \(error)")
+                    }
+                case .failure(let error):
+                    DevLog.log("Datei-Transkription fehlgeschlagen: \(error)")
+                    let alert = NSAlert()
+                    alert.messageText = "Datei-Transkription fehlgeschlagen (Format nicht lesbar?)"
+                    alert.runModal()
+                }
             }
         }
     }

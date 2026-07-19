@@ -114,12 +114,18 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         session.dataTask(with: request).resume()
     }
 
-    /// Lädt eine WAV-Aufnahme hoch und lässt sie transkribieren (server.py
+    /// Lädt eine Aufnahme hoch und lässt sie transkribieren (server.py
     /// `/api/transcribe`): Python übernimmt Whisper, Cleanup und LLM-Feinschliff.
     /// Das Einfügen macht die Swift-Seite selbst (siehe Paster) — der
     /// `insert=1`-Weg der Engine funktioniert aus dem Kindprozess heraus nicht.
     /// Die Sprache lässt die Engine über ihren eigenen Sprach-Cache bestimmen.
-    func transcribe(fileURL: URL,
+    ///
+    /// `filename` geht 1:1 in den Multipart-Header — server.py.decode_upload()
+    /// erkennt das Quellformat (m4a/mp3/mov/…) an dessen Endung, nicht am
+    /// tatsächlichen Bytes-Inhalt. Für die Diktier-Aufnahme (immer .wav) reicht
+    /// der Standardwert; die Datei-Transkription (P2.1d) übergibt die echte
+    /// Endung der vom Nutzer gewählten Datei.
+    func transcribe(fileURL: URL, filename: String = "audio.wav", timeout: TimeInterval = 30,
                      completion: @escaping (Result<TranscribeResult, Error>) -> Void) {
         guard let audioData = try? Data(contentsOf: fileURL) else {
             completion(.failure(LocalFlowAPIError.cannotReadAudioFile))
@@ -128,7 +134,7 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/transcribe"))
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeout
         if let token = LocalFlowToken.current {
             request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
         }
@@ -138,9 +144,9 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
 
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\r\n"
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"\(filename)\"\r\n"
             .data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
