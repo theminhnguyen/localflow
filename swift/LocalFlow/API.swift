@@ -53,6 +53,31 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         task.resume()
     }
 
+    /// GET /api/update-check — dieselbe GitHub-Vergleichslogik wie
+    /// localflow/updater.py, hier nur über HTTP statt in Swift nachgebaut.
+    /// completion liefert nil, wenn keine neuere Version verfügbar ist (oder
+    /// die Prüfung fehlschlug — beides fail-silent, wie auf der Python-Seite).
+    func checkForUpdate(completion: @escaping ((tag: String, url: String)?) -> Void) {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/update-check"))
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        let task = session.dataTask(with: request) { data, response, error in
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["available"] as? Bool == true,
+                  let tag = json["tag"] as? String,
+                  let url = json["url"] as? String
+            else {
+                completion(nil)
+                return
+            }
+            completion((tag: tag, url: url))
+        }
+        task.resume()
+    }
+
     /// Fire-and-forget beim Tastendruck: bittet die Engine, ausgekühlte
     /// GPU-Kernel im Hintergrund vorzuwärmen, während der Nutzer spricht — so
     /// zahlt die folgende Transkription nicht den Kalt-Aufschlag. Antwort egal.

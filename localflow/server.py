@@ -216,6 +216,23 @@ def create_app(engine, get_language, controller=None) -> Flask:
             body["state"] = controller.state
         return jsonify(**body)
 
+    @app.get("/api/update-check")
+    def update_check():
+        # Für die Swift-Hülle (Phase 3): dieselbe Prüf-Logik wie main.py
+        # FlowController.check_for_update_now(), nur als Endpunkt statt über
+        # einen rumps-Menü-Tick — kein Grund, GitHub-Abfrage + Versions-
+        # vergleich ein zweites Mal in Swift nachzubauen.
+        from . import __version__, updater
+
+        try:
+            found = updater.check_for_update(__version__)
+        except Exception:
+            log.debug("Update-Check fehlgeschlagen", exc_info=True)
+            found = None
+        if found:
+            return jsonify(available=True, tag=found["tag"], url=found["url"])
+        return jsonify(available=False)
+
     @app.get("/api/config")
     def get_config():
         c = cfg()

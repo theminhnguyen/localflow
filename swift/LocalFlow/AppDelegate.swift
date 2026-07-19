@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let flow = FlowController()
     private var status = "Startet Engine…"
     private var engineState: EngineProcess.State = .starting
+    private var updateAvailable: (tag: String, url: String)?
+    private var updateTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // kein Dock-Icon (Menüleisten-App)
@@ -39,11 +41,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DevLog.log("Mikrofon-Zugriff: \(granted ? "erteilt" : "ABGELEHNT")")
         }
+
+        scheduleUpdateChecks()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        updateTimer?.invalidate()
         flow.stop()
         engine.stop()
+    }
+
+    // ---- Update-Check (still im Hintergrund, nie blockierend) ----
+    //
+    // Dieselbe Zeitplanung wie main.py _update_check_loop: App-Start bleibt
+    // schlank (Netzwerk erst nach 60s), danach alle 24h. Prüft die eigentliche
+    // GitHub-Logik über den Engine-Endpunkt /api/update-check (server.py) —
+    // kein Grund, das ein zweites Mal in Swift nachzubauen.
+
+    private func scheduleUpdateChecks() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            self?.performAutomaticUpdateCheck()
+            let timer = Timer(timeInterval: 24 * 3600, repeats: true) { [weak self] _ in
+                self?.performAutomaticUpdateCheck()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self?.updateTimer = timer
+        }
+    }
+
+    /// Automatischer 24h-Check: respektiert den `update_check`-Schalter aus
+    /// der Konfiguration und bleibt bei "kein Update" still (kein Alert).
+    private func performAutomaticUpdateCheck() {
+        guard Config.bool("update_check", true) else { return }
+        LocalFlowAPI.shared.checkForUpdate { [weak self] result in
+            guard let result = result else { return }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                DevLog.log("Update verfügbar: \(result.tag)")
+                self.updateAvailable = result
+                self.render()
+            }
+        }
+    }
+
+    /// Manueller Check über das Menü — meldet IMMER zurück (auch "kein
+    /// Update"), unabhängig vom Schalter (main.py: manual=True-Verhalten).
+    @objc private func checkForUpdateNow() {
+        LocalFlowAPI.shared.checkForUpdate { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let alert = NSAlert()
+                if let result = result {
+                    self.updateAvailable = result
+                    self.render()
+                    alert.messageText = "Update verfügbar: \(result.tag)"
+                    alert.informativeText = result.url
+                } else {
+                    alert.messageText = "Du nutzt bereits die neueste Version."
+                }
+                alert.runModal()
+            }
+        }
+    }
+
+    @objc private func openUpdate() {
+        guard let update = updateAvailable, let url = URL(string: update.url) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // ---- Berechtigungen ----
@@ -110,6 +173,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func render() {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "LocalFlow — \(status)", action: nil, keyEquivalent: ""))
+        if let update = updateAvailable {
+            menu.addItem(withTitle: "⬆️ Update \(update.tag) verfügbar…",
+                         action: #selector(openUpdate), target: self)
+        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "⚙️ Einstellungen im Browser öffnen…",
                      action: #selector(openSettings), target: self)
@@ -125,6 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         target: self)
         }
         menu.addItem(withTitle: "🩺 Log öffnen", action: #selector(openLog), target: self)
+        menu.addItem(withTitle: "🔄 Jetzt nach Updates suchen",
+                     action: #selector(checkForUpdateNow), target: self)
         menu.addItem(withTitle: "Beenden", action: #selector(quit),
                      keyEquivalent: "q", target: self)
         statusItem.menu = menu

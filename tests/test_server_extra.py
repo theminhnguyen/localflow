@@ -165,6 +165,42 @@ def test_insert_respects_setting(client, monkeypatch):
     assert calls == []
 
 
+def test_update_check_reports_available(client, monkeypatch):
+    c, ctrl = client
+    import localflow.updater as updater
+
+    monkeypatch.setattr(
+        updater, "check_for_update",
+        lambda current, timeout=4.0: {"tag": "v9.9.9", "url": "https://example.invalid/v9.9.9"})
+    r = c.get("/api/update-check")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j == {"available": True, "tag": "v9.9.9", "url": "https://example.invalid/v9.9.9"}
+
+
+def test_update_check_reports_none(client, monkeypatch):
+    c, ctrl = client
+    import localflow.updater as updater
+
+    monkeypatch.setattr(updater, "check_for_update", lambda current, timeout=4.0: None)
+    r = c.get("/api/update-check")
+    assert r.status_code == 200
+    assert r.get_json() == {"available": False}
+
+
+def test_update_check_survives_network_error(client, monkeypatch):
+    c, ctrl = client
+    import localflow.updater as updater
+
+    def boom(current, timeout=4.0):
+        raise OSError("kein Netz")
+
+    monkeypatch.setattr(updater, "check_for_update", boom)
+    r = c.get("/api/update-check")
+    assert r.status_code == 200
+    assert r.get_json() == {"available": False}
+
+
 def test_api_insert_calls_inserter(client, monkeypatch):
     c, ctrl = client
     calls = []
