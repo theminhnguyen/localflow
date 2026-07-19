@@ -35,7 +35,7 @@ pkill -9 -f "LocalFlow.app/Contents/Resources/engine" 2>/dev/null || true
 sleep 1
 rm -rf build dist
 "$PY" -m PyInstaller packaging/LocalFlow.spec --noconfirm --clean \
-  --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1
+  --distpath dist --workpath build >/tmp/pyinstaller.log 2>&1 || true
 [ -d "$ENGINE_DIST" ] || { echo "✗ Engine-Build fehlgeschlagen — siehe /tmp/pyinstaller.log"; tail -40 /tmp/pyinstaller.log; exit 1; }
 
 echo "▸ 2/6  Swift-App bauen (Release)…"
@@ -45,8 +45,8 @@ sleep 1
 rm -rf swift/build
 (cd swift && xcodegen generate)
 xcodebuild -project swift/LocalFlow.xcodeproj -scheme LocalFlow -configuration Release \
-  -derivedDataPath swift/build build >/tmp/xcodebuild.log 2>&1
-[ -d "$APP" ] || { echo "✗ Swift-Build fehlgeschlagen — siehe /tmp/xcodebuild.log"; tail -60 /tmp/xcodebuild.log; exit 1; }
+  -derivedDataPath swift/build build >/tmp/xcodebuild.log 2>&1 || true
+[ -d "$APP" ] || { echo "✗ Swift-Build fehlgeschlagen — siehe /tmp/xcodebuild.log"; tail -80 /tmp/xcodebuild.log; exit 1; }
 
 echo "▸ 3/6  Engine ins Bundle kopieren…"
 # EngineProcess.swift sucht die Engine unter Contents/Resources/engine/ per
