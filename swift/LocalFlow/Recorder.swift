@@ -6,9 +6,16 @@ import AVFoundation
 final class Recorder {
     enum RecorderError: Error { case alreadyRecording, converterUnavailable }
 
-    private let engine = AVAudioEngine()
+    /// Wird gerufen, wenn eine laufende Aufnahme durch einen Geräte-/Format-
+    /// wechsel (z.B. AirPods verbinden/trennen während des Diktierens)
+    /// abgebrochen werden musste — der Aufrufer soll dann Status/Sound
+    /// zurücksetzen, die Aufnahme selbst ist bereits verworfen.
+    var onInterrupted: (() -> Void)?
+
+    private var engine: AVAudioEngine?
     private var outputFile: AVAudioFile?
     private var tempURL: URL?
+    private var configObserver: NSObjectProtocol?
     private(set) var isRecording = false
 
     /// WAV auf der Platte: 16 kHz mono 16-bit PCM.
@@ -32,6 +39,16 @@ final class Recorder {
     func start() throws {
         guard !isRecording else { throw RecorderError.alreadyRecording }
 
+        // Frische Engine pro Aufnahme statt einer über die Objekt-Lebenszeit
+        // wiederverwendeten Instanz: Wechselt das Eingabegerät zwischen zwei
+        // Diktaten (z.B. AirPods verbinden), kann eine alte AVAudioEngine
+        // einen inkonsistenten internen Graph behalten — installTap/start
+        // wirft dann teils ObjC-Exceptions, die Swift NICHT fangen kann
+        // (Absturz). Eine neue Instanz ist billig und immer im sauberen
+        // Ausgangszustand, unabhängig davon, was seit der letzten Aufnahme
+        // am Audiosystem passiert ist.
+        let engine = AVAudioEngine()
+
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
 
@@ -41,8 +58,7 @@ final class Recorder {
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("localflow-\(UUID().uuidString).wav")
-        tempURL = url
-        outputFile = try AVAudioFile(forWriting: url, settings: fileSettings)
+        let file = try AVAudioFile(forWriting: url, settings: fileSettings)
 
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self, let file = self.outputFile else { return }
@@ -76,10 +92,42 @@ final class Recorder {
             }
         }
 
-        try engine.start()
+        // Gerätewechsel während der Aufnahme beobachten (AirPods verbinden/
+        // trennen, USB-Mikro ab-/angesteckt, …) — sauber abbrechen statt
+        // riskieren, dass der Tap auf ein plötzlich falsches Format trifft.
+        // queue: .main, damit der Handler garantiert auf demselben Thread wie
+        // start()/stop() läuft (die Benachrichtigung selbst kommt von einem
+        // beliebigen AVFoundation-internen Thread).
+        let observer = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigurationChange()
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            NotificationCenter.default.removeObserver(observer)
+            throw error
+        }
+
+        self.engine = engine
+        self.outputFile = file
+        self.tempURL = url
+        self.configObserver = observer
         isRecording = true
         DevLog.log("Recorder: Aufnahme läuft (Eingang \(inputFormat.sampleRate) Hz, "
             + "\(inputFormat.channelCount) Kanäle) -> \(url.lastPathComponent)")
+    }
+
+    private func handleConfigurationChange() {
+        guard isRecording else { return }
+        DevLog.log("Recorder: Audiogerät während der Aufnahme gewechselt — breche ab")
+        let url = stop()
+        if let url = url {
+            try? FileManager.default.removeItem(at: url)
+        }
+        onInterrupted?()
     }
 
     /// Beendet die Aufnahme, liefert die fertige WAV-Datei (nil, falls nichts lief).
@@ -87,8 +135,14 @@ final class Recorder {
     func stop() -> URL? {
         guard isRecording else { return nil }
         isRecording = false
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
+        }
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
         outputFile = nil  // schließt die Datei (AVAudioFile schreibt den Header beim Deinit)
 
         let url = tempURL

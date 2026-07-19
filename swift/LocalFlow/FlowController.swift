@@ -36,6 +36,16 @@ final class FlowController {
                             onPress: { [weak self] in self?.onPress() },
                             onRelease: { [weak self] in self?.onRelease() })
         hotkey?.start()
+        // z.B. AirPods verbinden/trennen mitten im Diktieren -> Recorder bricht
+        // selbst sauber ab (siehe Recorder.handleConfigurationChange), hier nur
+        // noch den eigenen Zustand zurücksetzen und den Nutzer informieren.
+        recorder.onInterrupted = { [weak self] in
+            guard let self = self else { return }
+            self.locked = false
+            self.recordingStarted = nil
+            Sounds.play(.error)
+            self.status("Aufnahme unterbrochen (Audiogerät gewechselt)")
+        }
     }
 
     func stop() {

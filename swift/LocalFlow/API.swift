@@ -33,11 +33,22 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     }()
 
-    /// Schnellcheck ohne Auth (analog `/api/ping` in server.py).
+    /// Schnellcheck ohne Auth (analog `/api/ping` in server.py). Liefert erst
+    /// dann true, wenn das Whisper-Modell tatsächlich geladen ist (`loaded`) —
+    /// NICHT schon, sobald der Flask-Server antwortet. Sonst meldet
+    /// EngineProcess "Bereit", bevor die Engine wirklich diktieren kann: ein
+    /// Diktat mitten in den ~10-20s Modell-Kaltstart lief dabei live in einen
+    /// 30s-Timeout, weil die Antwort erst nach dem clientseitigen Abbruch kam.
     func ping(completion: @escaping (Bool) -> Void) {
         let task = session.dataTask(with: baseURL.appendingPathComponent("api/ping")) { data, response, error in
-            let ok = error == nil && (response as? HTTPURLResponse)?.statusCode == 200
-            completion(ok)
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                completion(false)
+                return
+            }
+            completion((json["ok"] as? Bool ?? false) && (json["loaded"] as? Bool ?? false))
         }
         task.resume()
     }
