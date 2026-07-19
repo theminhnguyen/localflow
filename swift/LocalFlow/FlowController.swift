@@ -63,6 +63,10 @@ final class FlowController {
         recordingStarted = Date()
         Sounds.play(.start)
         status("Nimmt auf…")
+        // Ausgekühlte Kernel vorwärmen, während aufgenommen wird (siehe
+        // engine.prewarm_if_cold / server.py /api/prewarm) — spart den
+        // Kalt-Aufschlag des ersten Diktats nach einer Pause.
+        LocalFlowAPI.shared.prewarm()
     }
 
     private func onRelease() {
@@ -159,7 +163,12 @@ final class FlowController {
                 // auf losgelassene Modifier-Tasten und darf niemand anderen aufhalten.
                 let inserted = Paster.insert(result.text)
                 DevLog.log("Einfügen: \(inserted ? "ok" : "fehlgeschlagen")")
-                self.lastText = result.text
+                // Auf dem Haupt-Thread schreiben: AppDelegate.render() liest
+                // lastText beim Menü-Aufbau auf dem Haupt-Thread — ohne das wäre
+                // dies ein unsynchronisierter Zugriff von zwei Threads auf
+                // dieselbe Property (Datenrennen).
+                let text = result.text
+                DispatchQueue.main.async { self.lastText = text }
                 if !inserted { Sounds.play(.error) }
                 self.flash(inserted ? "Eingefügt ✓" : "In der Zwischenablage (⌘V)")
             case .failure(let error):
