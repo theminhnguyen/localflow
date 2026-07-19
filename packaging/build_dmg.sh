@@ -44,6 +44,14 @@ pkill -9 -f "LocalFlow.app/Contents/MacOS/LocalFlow" 2>/dev/null || true
 sleep 1
 rm -rf swift/build
 (cd swift && xcodegen generate)
+# xcodegen schreibt mit neuen Xcode-Versionen ein "Projektformat der Zukunft"
+# (objectVersion 77, seit Xcode 16 für Ordner-Referenzen) — ältere Xcode-
+# Versionen (z.B. auf GitHub-Actions-Runnern) können solche Projekte dann
+# nicht mehr öffnen ("cannot be opened because it is in a future Xcode
+# project file format"). Das Projekt hier nutzt keine Xcode-16-exklusiven
+# Funktionen, darum unbedenklich auf einen breit kompatiblen Wert zurück-
+# setzen (bestätigter Fix, siehe github.com/yonaskolb/XcodeGen/issues/1578).
+sed -i '' 's/objectVersion = [0-9]*;/objectVersion = 60;/' swift/LocalFlow.xcodeproj/project.pbxproj
 xcodebuild -project swift/LocalFlow.xcodeproj -scheme LocalFlow -configuration Release \
   -derivedDataPath swift/build build >/tmp/xcodebuild.log 2>&1 || true
 [ -d "$APP" ] || { echo "✗ Swift-Build fehlgeschlagen — siehe /tmp/xcodebuild.log"; tail -80 /tmp/xcodebuild.log; exit 1; }
