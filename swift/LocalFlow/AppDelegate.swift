@@ -180,6 +180,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "⚙️ Einstellungen im Browser öffnen…",
                      action: #selector(openSettings), target: self)
+        let autoItem = menu.addItem(withTitle: "🚀 Beim Anmelden starten",
+                                     action: #selector(toggleAutostart), target: self)
+        autoItem.state = Autostart.enabled ? .on : .off
         let copyItem = menu.addItem(withTitle: "📋 Letzten Text kopieren",
                                      action: #selector(copyLastText), target: self)
         copyItem.isEnabled = flow.lastText != nil
@@ -209,6 +212,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let url = "https://127.0.0.1:\(EngineProcess.defaultPort)/settings#k=\(token)"
         NSWorkspace.shared.open(URL(string: url)!)
+    }
+
+    @objc private func toggleAutostart() {
+        Autostart.setEnabled(!Autostart.enabled)
+        render()
     }
 
     @objc private func copyLastText() {
