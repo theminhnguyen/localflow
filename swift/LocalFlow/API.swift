@@ -42,6 +42,19 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         task.resume()
     }
 
+    /// Fire-and-forget beim Tastendruck: bittet die Engine, ausgekühlte
+    /// GPU-Kernel im Hintergrund vorzuwärmen, während der Nutzer spricht — so
+    /// zahlt die folgende Transkription nicht den Kalt-Aufschlag. Antwort egal.
+    func prewarm() {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/prewarm"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        session.dataTask(with: request).resume()
+    }
+
     /// Lädt eine WAV-Aufnahme hoch und lässt sie transkribieren (server.py
     /// `/api/transcribe`): Python übernimmt Whisper, Cleanup und LLM-Feinschliff.
     /// Das Einfügen macht die Swift-Seite selbst (siehe Paster) — der

@@ -6,6 +6,31 @@ Alle nennenswerten Änderungen an LocalFlow. Format angelehnt an
 jedes [GitHub-Release](https://github.com/theminhnguyen/localflow/releases)
 sind die technische Rohfassung — hier die kuratierte Sicht.
 
+## [0.6.1] — 2026-07-19
+
+### Added
+- **Vorwärmen gegen langsame Diktate nach einer Pause.** Nach längerem Nicht-
+  Diktieren (z. B. der Mac schlief zwischenzeitlich) dauerte das erste Diktat
+  3-5x so lange wie gewohnt (gemessen: 5202ms statt 1008ms) — die GPU-Kernel
+  kühlen aus. LocalFlow wärmt sie jetzt beim Drücken der Diktier-Taste im
+  Hintergrund vor, während man spricht, sodass die eigentliche Transkription
+  beim Loslassen schon heiße Kernel vorfindet. Neuer Endpunkt `/api/prewarm`
+  für die Swift-Hülle, die den Hotkey selbst abfängt.
+
+### Fixed
+- **Sicherheit:** `/api/insert` (Fallback-Einfügeweg für die Swift-Hülle)
+  respektiert jetzt den „Handy darf einfügen"-Schalter — vorher konnte ihn
+  jedes Gerät im WLAN mit gültigem Kopplungs-Token umgehen. Aufrufe vom Mac
+  selbst (die Swift-Hülle) sind davon unabhängig weiter erlaubt.
+- **Zwischenablage-Wiederherstellung bei Serien-Diktaten:** Der verzögerte
+  Restore nach dem Einfügen (0,6s) konnte bei zwei schnell aufeinander-
+  folgenden Diktaten genau zwischen „Zwischenablage = Text 2" und dem
+  simulierten ⌘V feuern — eingefügt wurde dann die alte Zwischenablage statt
+  des zweiten Diktats. Der Restore ist jetzt abbrechbar (Python + Swift).
+- **Swift-Hülle:** Stürzt die Engine ab, startet sie jetzt automatisch neu
+  (Backoff 1s/5s/15s statt dauerhaft "Fehler" in der Menüleiste); ein
+  Datenrennen beim zuletzt eingefügten Text (fürs Menü) behoben.
+
 ## [0.6.0] — 2026-07-17
 
 ### Added

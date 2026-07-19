@@ -190,6 +190,10 @@ class FlowController:
         self.locked = False
         self.rec_started = time.monotonic()
         self._sound(SOUND_START)
+        # Ausgekühlte GPU-Kernel JETZT vorwärmen, während der Nutzer spricht —
+        # dann ist die Transkription beim Loslassen schon heiß (spart den 3-5x-
+        # Aufschlag des ersten Diktats nach einer Pause).
+        self.engine.prewarm_if_cold()
 
     def on_release(self) -> None:
         if not self.recording:

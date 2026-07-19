@@ -50,6 +50,9 @@ class FakeEngine:
     def warmup_async(self):
         pass
 
+    def prewarm_if_cold(self):
+        pass
+
 
 def make_controller(**cfg_extra):
     cfg = {"language": "de", "min_duration": 0.3, "silence_rms": 0.006,

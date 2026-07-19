@@ -21,6 +21,16 @@ MODELS = {
 
 SAMPLE_RATE = 16000
 
+# So lange ohne Diktat gilt die Engine als "ausgekühlt". Gemessen (echtes
+# Nutzungslog): die erste Transkription nach einer längeren Pause dauert 3-5x
+# so lange wie die folgenden — 5202ms statt 1008ms bei kürzerem Audio, aber
+# auch schon nach nur 78 Minuten Pause lief ein Diktat mit 1109ms wieder
+# normal schnell. Diese Messwerte rechtfertigen keine aggressive Schwelle:
+# 120s hätte nach JEDER 2-Minuten-Denkpause eine Stille-Inferenz ausgelöst und
+# ein sehr kurzes Diktat direkt danach hinter ihr im Engine-Lock warten
+# lassen. 600s (10 min) trifft eher die tatsächlichen Auskühl-Pausen.
+COLD_AFTER_S = 600
+
 
 class Engine:
     """Lädt das Modell einmal (lazy) und transkribiert 16-kHz-Mono-Float32-Audio."""
@@ -29,6 +39,7 @@ class Engine:
         self.repo = MODELS.get(model, model)
         self._lock = threading.Lock()
         self._loaded = False
+        self._last_use = 0.0
 
     def warmup(self) -> None:
         """Lädt Modellgewichte vorab und wärmt die GPU-Kernel auf.
@@ -56,6 +67,38 @@ class Engine:
             self.warmup()
         except Exception:
             log.exception("Modell-Warmup fehlgeschlagen")
+
+    def prewarm_if_cold(self) -> None:
+        """Wärmt die GPU-Kernel im Hintergrund vor, wenn die Engine ausgekühlt ist.
+
+        Gedacht für den Moment, in dem der Nutzer die Diktier-Taste DRÜCKT und zu
+        sprechen beginnt: Der Aufwärm-Durchlauf (eine Stille-Inferenz) läuft dann
+        parallel zum Sprechen, sodass die echte Transkription beim Loslassen schon
+        heiße Kernel vorfindet. So zahlt nicht das erste Diktat nach einer Pause
+        den 3-5x-Aufschlag, sondern niemand.
+
+        Läuft nur, wenn das Modell schon geladen ist (sonst ist es der normale
+        Kaltstart, der eh separat aufwärmt), nicht öfter als nötig, und nie
+        gleichzeitig mit einer laufenden Transkription (das Lock serialisiert).
+        """
+        if not self._loaded:
+            return
+        if time.monotonic() - self._last_use < COLD_AFTER_S:
+            return  # noch heiß, kein Aufwärmen nötig
+        if self._lock.locked():
+            return  # es läuft ohnehin gerade eine Transkription -> wird warm
+
+        def run():
+            try:
+                silence = np.zeros(SAMPLE_RATE, dtype=np.float32)
+                start = time.monotonic()
+                self.transcribe(silence, language="de")
+                log.info("Vorgewärmt (%dms) — Engine war ausgekühlt",
+                         int((time.monotonic() - start) * 1000))
+            except Exception:
+                log.debug("Vorwärmen fehlgeschlagen", exc_info=True)
+
+        threading.Thread(target=run, daemon=True).start()
 
     @property
     def loaded(self) -> bool:
@@ -95,6 +138,7 @@ class Engine:
             )
             self._loaded = True
         ms = int((time.monotonic() - start) * 1000)
+        self._last_use = time.monotonic()
 
         return {
             "text": (result.get("text") or "").strip(),
