@@ -196,6 +196,15 @@ def create_app(engine, get_language, controller=None) -> Flask:
         ]
         return jsonify(enabled=True, entries=entries)
 
+    @app.delete("/api/history")
+    def clear_history_endpoint():
+        # Für die Swift-Hülle: "Verlauf leeren" im neuen Verlauf-Untermenü,
+        # dieselbe Funktion wie menubar._clear_history().
+        config.clear_history()
+        if controller is not None:
+            controller.history_dirty = True
+        return jsonify(ok=True)
+
     @app.get("/api/status")
     def status():
         from . import llm

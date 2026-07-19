@@ -29,6 +29,11 @@ final class FlowController {
     var engineReady = false
     /// Wird immer auf dem Haupt-Thread gerufen (die Menüleiste malt nur dort).
     var onStatus: ((String) -> Void)?
+    /// Feuert nach jedem erfolgreich eingefügten Diktat (Haupt-Thread) — die
+    /// Engine hat den Eintrag da schon in ihren Verlauf geschrieben
+    /// (config.add_history in /api/transcribe), AppDelegate lädt ihn für das
+    /// Verlauf-Menü nach.
+    var onDictationComplete: (() -> Void)?
 
     func start() {
         let key = HotkeyKey.configured()
@@ -178,7 +183,10 @@ final class FlowController {
                 // dies ein unsynchronisierter Zugriff von zwei Threads auf
                 // dieselbe Property (Datenrennen).
                 let text = result.text
-                DispatchQueue.main.async { self.lastText = text }
+                DispatchQueue.main.async {
+                    self.lastText = text
+                    self.onDictationComplete?()
+                }
                 if !inserted { Sounds.play(.error) }
                 self.flash(inserted ? "Eingefügt ✓" : "In der Zwischenablage (⌘V)")
             case .failure(let error):

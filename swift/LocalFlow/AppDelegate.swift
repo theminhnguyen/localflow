@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateAvailable: (tag: String, url: String)?
     private var updateTimer: Timer?
     private var qrWindowController: QRWindowController?
+    private var historyEntries: [HistoryEntry] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // kein Dock-Icon (Menüleisten-App)
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.status = text
             self?.render()
         }
+        flow.onDictationComplete = { [weak self] in self?.refreshHistory() }
         flow.start()
 
         // Explizit anfragen statt auf den ersten Aufnahme-Versuch zu warten —
@@ -166,6 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             flow.engineReady = true
             DevLog.log("Engine bereit")
             status = "Bereit"
+            refreshHistory()
         case .crashed:
             flow.engineReady = false
             DevLog.log("Engine abgestürzt")
@@ -192,6 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "📱 Handy koppeln", submenu: pairingSubmenu())
         menu.addItem(withTitle: "📄 Datei transkribieren…",
                      action: #selector(transcribeFile), target: self)
+        menu.addItem(withTitle: "🌐 Sprache", submenu: languageSubmenu())
+        menu.addItem(withTitle: "🕘 Verlauf", submenu: historySubmenu())
         let copyItem = menu.addItem(withTitle: "📋 Letzten Text kopieren",
                                      action: #selector(copyLastText), target: self)
         copyItem.isEnabled = flow.lastText != nil
@@ -203,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(withTitle: "🔄 Engine neu starten", action: #selector(restartEngine),
                         target: self)
         }
+        menu.addItem(withTitle: "📊 Status anzeigen", action: #selector(showStatus), target: self)
         menu.addItem(withTitle: "🩺 Log öffnen", action: #selector(openLog), target: self)
         menu.addItem(withTitle: "🔄 Jetzt nach Updates suchen",
                      action: #selector(checkForUpdateNow), target: self)
@@ -226,6 +232,135 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleAutostart() {
         Autostart.setEnabled(!Autostart.enabled)
         render()
+    }
+
+    // ---- Sprache ----
+
+    private static let languages = [("Automatisch", "auto"), ("Deutsch", "de"), ("Englisch", "en")]
+
+    /// Ließt den aktuellen Wert direkt aus config.json (Config.swift, kein
+    /// Netzwerk nötig) — geschrieben wird über PUT /api/config, das server.py
+    /// synchron persistiert, bevor die Antwort zurückkommt (main.py.set_language).
+    private func languageSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        let current = Config.string("language") ?? "auto"
+        for (label, code) in Self.languages {
+            let item = submenu.addItem(withTitle: label, action: #selector(setLanguage(_:)),
+                                        target: self)
+            item.state = current == code ? .on : .off
+            item.representedObject = code
+        }
+        return submenu
+    }
+
+    @objc private func setLanguage(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String else { return }
+        LocalFlowAPI.shared.setConfig("language", code) { [weak self] _ in
+            DispatchQueue.main.async { self?.render() }
+        }
+    }
+
+    // ---- Verlauf ----
+
+    private func refreshHistory() {
+        LocalFlowAPI.shared.fetchHistory { [weak self] entries in
+            DispatchQueue.main.async {
+                self?.historyEntries = entries
+                self?.render()
+            }
+        }
+    }
+
+    /// Analog zu menubar._refresh_history(): bis zu 8 Einträge, auf 60 Zeichen
+    /// gekürzt, 📱-Präfix für Handy-Diktate, Klick kopiert den vollen Text.
+    private func historySubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        if historyEntries.isEmpty {
+            let empty = NSMenuItem(title: "(leer)", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+        } else {
+            for entry in historyEntries.prefix(8) {
+                let icon = entry.source == "phone" ? "📱 " : ""
+                let truncated = entry.text.count > 60
+                    ? String(entry.text.prefix(60)) + "…" : entry.text
+                let item = submenu.addItem(withTitle: icon + truncated,
+                                            action: #selector(copyHistoryEntry(_:)), target: self)
+                item.representedObject = entry.text
+            }
+        }
+        submenu.addItem(NSMenuItem.separator())
+        submenu.addItem(withTitle: "Verlauf leeren", action: #selector(clearHistoryMenu),
+                        target: self)
+        return submenu
+    }
+
+    @objc private func copyHistoryEntry(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    @objc private func clearHistoryMenu() {
+        LocalFlowAPI.shared.clearHistory { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshHistory() }
+        }
+    }
+
+    // ---- Diagnose ----
+
+    /// Formatiert /api/status + lokal geprüfte Berechtigungen zu demselben
+    /// Text wie main.py.status_report() — ohne eigenen Formatierungs-
+    /// Endpunkt, die JSON-Rohdaten reichen.
+    @objc private func showStatus() {
+        LocalFlowAPI.shared.fetchStatus { json in
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "LocalFlow — Status"
+                alert.informativeText = Self.formatStatus(json)
+                alert.runModal()
+            }
+        }
+    }
+
+    private static func formatStatus(_ json: [String: Any]?) -> String {
+        guard let json = json else { return "Status konnte nicht geladen werden." }
+        let version = json["version"] as? String ?? "?"
+        let model = json["model"] as? String ?? "?"
+        let loaded = json["loaded"] as? Bool ?? false
+        let uptimeS = json["uptime_s"] as? Int ?? 0
+        let stats = json["stats"] as? [String: Any] ?? [:]
+        let count = stats["count"] as? Int ?? 0
+        let audioS = (stats["audio_s"] as? NSNumber)?.doubleValue ?? 0
+        let engineMs = stats["engine_ms"] as? Int ?? 0
+        let avgMs = count > 0 ? engineMs / count : 0
+        let llmUsed = stats["llm_used"] as? Int ?? 0
+        let llm = json["llm"] as? [String: Any] ?? [:]
+        let llmEnabled = llm["enabled"] as? Bool ?? false
+        let llmLine: String
+        if llm["ready"] as? Bool == true {
+            let backend = llm["backend"] as? String ?? "?"
+            let llmModel = llm["model"] as? String ?? "?"
+            llmLine = "\(backend): \(llmModel) bereit"
+        } else {
+            let hint = llm["hint"] as? String ?? "?"
+            llmLine = "kein LLM aktiv (\(hint))"
+        }
+        let lanIP = json["lan_ip"] as? String ?? "?"
+        let port = json["port"] as? Int ?? 0
+        func ok(_ v: Bool) -> String { v ? "✅" : "❌" }
+
+        return """
+        LocalFlow v\(version)
+        Läuft seit: \(uptimeS / 3600)h \((uptimeS % 3600) / 60)min
+        Modell: \(model) (\(loaded ? "geladen" : "lädt…"))
+        Diktate: \(count)  ·  Audio: \(Int(audioS))s  ·  Ø Engine: \(avgMs)ms
+        KI-Feinschliff: \(llmEnabled ? "an" : "aus") (\(llmLine))  ·  genutzt: \(llmUsed)×
+        Eingabemonitoring: \(ok(CGPreflightListenEventAccess()))   \
+        Bedienungshilfen: \(ok(CGPreflightPostEventAccess()))
+        Server: https://\(lanIP):\(port)
+        """
     }
 
     /// Untermenü mit beiden QR-Varianten (server.py: variant=lan|ts) — analog

@@ -140,6 +140,16 @@ def test_history_can_be_disabled(client):
     assert h["enabled"] is False and h["entries"] == []
 
 
+def test_clear_history_endpoint(client):
+    c, ctrl = client
+    c.post("/api/transcribe", data={"audio": (io.BytesIO(wav_bytes()), "a.wav")})
+    assert c.get("/api/history").get_json()["entries"]
+    r = c.delete("/api/history")
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert c.get("/api/history").get_json()["entries"] == []
+    assert ctrl.history_dirty is True
+
+
 def test_insert_flag_calls_inserter(client, monkeypatch):
     c, ctrl = client
     calls = []

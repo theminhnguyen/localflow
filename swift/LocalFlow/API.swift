@@ -14,6 +14,11 @@ struct TranscribeResult {
     let text: String
 }
 
+struct HistoryEntry {
+    let text: String
+    let source: String
+}
+
 enum LocalFlowAPIError: Error {
     case cannotReadAudioFile
     case badResponse
@@ -74,6 +79,86 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
                 return
             }
             completion((tag: tag, url: url))
+        }
+        task.resume()
+    }
+
+    /// PUT /api/config — schreibt EINEN Konfigurationswert. server.py wendet
+    /// ihn über den bestehenden Controller-Setter an (inkl. sofortigem
+    /// Persistieren nach config.json) — dieselbe Route, die auch /settings
+    /// im Browser nutzt. Für das Sprache-Menü, statt eine eigene
+    /// Schreib-/Persistenz-Logik in Swift nachzubauen.
+    func setConfig(_ key: String, _ value: Any, completion: @escaping (Bool) -> Void) {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/config"))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [key: value])
+        let task = session.dataTask(with: request) { data, response, error in
+            completion(error == nil && (response as? HTTPURLResponse)?.statusCode == 200)
+        }
+        task.resume()
+    }
+
+    /// GET /api/history — für das Verlauf-Untermenü (server.py liefert schon
+    /// bis zu 30 Einträge, respektiert den "share_history"-Schalter selbst).
+    func fetchHistory(completion: @escaping ([HistoryEntry]) -> Void) {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/history"))
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        let task = session.dataTask(with: request) { data, response, error in
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["enabled"] as? Bool == true,
+                  let rawEntries = json["entries"] as? [[String: Any]]
+            else {
+                completion([])
+                return
+            }
+            let entries = rawEntries.compactMap { e -> HistoryEntry? in
+                guard let text = e["text"] as? String, !text.isEmpty else { return nil }
+                return HistoryEntry(text: text, source: e["source"] as? String ?? "")
+            }
+            completion(entries)
+        }
+        task.resume()
+    }
+
+    /// DELETE /api/history — "Verlauf leeren" im Menü.
+    func clearHistory(completion: @escaping (Bool) -> Void) {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/history"))
+        request.httpMethod = "DELETE"
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        let task = session.dataTask(with: request) { data, response, error in
+            completion(error == nil && (response as? HTTPURLResponse)?.statusCode == 200)
+        }
+        task.resume()
+    }
+
+    /// GET /api/status — Rohdaten fürs Diagnose-Fenster. Wird in AppDelegate
+    /// zusammen mit den lokal (ohne Netzwerk) verfügbaren macOS-Berechtigungen
+    /// zu einem Text zusammengesetzt, analog zu main.py.status_report() —
+    /// kein Grund für einen eigenen Text-Formatierungs-Endpunkt.
+    func fetchStatus(completion: @escaping ([String: Any]?) -> Void) {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/status"))
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        let task = session.dataTask(with: request) { data, response, error in
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                completion(nil)
+                return
+            }
+            completion(json)
         }
         task.resume()
     }
