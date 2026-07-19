@@ -13,6 +13,12 @@ enum DevLog {
         return dir.appendingPathComponent("swift-dev.log")
     }()
 
+    // Gleiche Werte wie RotatingFileHandler(maxBytes=500_000, backupCount=2)
+    // auf der Python-Seite (localflow/main.py _setup_logging) — sonst wächst
+    // diese Datei hier unbegrenzt, während das Python-Log längst rotiert.
+    private static let maxBytes = 500_000
+    private static let backupCount = 2
+
     private static let queue = DispatchQueue(label: "studio.minh.localflow.devlog")
 
     private static let formatter: DateFormatter = {
@@ -25,6 +31,7 @@ enum DevLog {
         let line = "\(formatter.string(from: Date())) \(message)\n"
         queue.async {
             guard let data = line.data(using: .utf8) else { return }
+            rotateIfNeeded(nextWriteSize: data.count)
             if let handle = try? FileHandle(forWritingTo: fileURL) {
                 handle.seekToEndOfFile()
                 handle.write(data)
@@ -33,5 +40,33 @@ enum DevLog {
                 try? data.write(to: fileURL)
             }
         }
+    }
+
+    /// Rotation wie Python `RotatingFileHandler`: swift-dev.log -> .1 -> .2,
+    /// die älteste Generation fällt weg. Läuft auf derselben Queue wie log()
+    /// selbst — kein zusätzliches Locking gegen gleichzeitige Schreibzugriffe
+    /// nötig, die Queue serialisiert das ohnehin.
+    private static func rotateIfNeeded(nextWriteSize: Int) {
+        let fm = FileManager.default
+        let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+        let currentSize = (attrs?[.size] as? Int) ?? 0
+        guard currentSize + nextWriteSize > maxBytes else { return }
+
+        let dir = fileURL.deletingLastPathComponent()
+        let base = fileURL.lastPathComponent
+
+        let oldest = dir.appendingPathComponent("\(base).\(backupCount)")
+        try? fm.removeItem(at: oldest)
+        if backupCount > 1 {
+            for i in stride(from: backupCount - 1, through: 1, by: -1) {
+                let src = dir.appendingPathComponent("\(base).\(i)")
+                let dst = dir.appendingPathComponent("\(base).\(i + 1)")
+                try? fm.removeItem(at: dst)
+                try? fm.moveItem(at: src, to: dst)
+            }
+        }
+        let firstBackup = dir.appendingPathComponent("\(base).1")
+        try? fm.removeItem(at: firstBackup)
+        try? fm.moveItem(at: fileURL, to: firstBackup)
     }
 }
