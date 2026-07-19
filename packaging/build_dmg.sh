@@ -163,7 +163,7 @@ else
 fi
 rm -rf "$STAGE"
 
-# Gebaute .app aus swift/build/ entfernen — sie steckt jetzt in der DMG.
+# Gebaute Zwischenstände entfernen — die fertige App steckt jetzt in der DMG.
 #
 # WARUM: macOS bindet Bedienungshilfen-/Eingabemonitoring-Rechte bei ad-hoc
 # signierten Apps an den DATEIPFAD. Bliebe eine gebaute Kopie liegen, gäbe es
@@ -171,7 +171,14 @@ rm -rf "$STAGE"
 # Häkchen bei der einen, startet aber die andere, und die Rechte "gehen wieder
 # aus". Genau dieser Bug wurde am 2026-07-14 gemeldet (damals mit der reinen
 # Python-App, gilt aber unverändert für die Swift-Hülle).
-rm -rf swift/build dist/LocalFlow-Engine
+# dist/LocalFlow.app: NICHT von diesem Skript gebaut, sondern ein Nebenprodukt
+# von Schritt 1 — packaging/LocalFlow.spec definiert in EINER Datei sowohl das
+# alte Vollständig-App-Ziel ("LocalFlow", Menüleiste inklusive) als auch das
+# hier genutzte Engine-Ziel ("LocalFlow-Engine"); PyInstaller baut beim Lauf
+# gegen die Spec-Datei IMMER beide. Muss mit aufgeräumt werden, sonst bleibt
+# genau diese alte Kopie als zweiter "LocalFlow"-Treffer liegen (am 2026-07-19
+# selbst darüber gestolpert, nachdem sie unbemerkt automatisch gestartet war).
+rm -rf swift/build dist/LocalFlow-Engine dist/LocalFlow.app dist/LocalFlow
 
 SIZE="$(du -h "$DMG" | cut -f1)"
 echo "✅ Fertig: $DMG  ($SIZE)"
