@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from . import autostart, config
 from .cleanup import clean
@@ -232,6 +232,28 @@ def create_app(engine, get_language, controller=None) -> Flask:
         if found:
             return jsonify(available=True, tag=found["tag"], url=found["url"])
         return jsonify(available=False)
+
+    @app.get("/api/qr")
+    def qr_code():
+        # Für die Swift-Hülle: dieselbe Kopplungs-URL wie menubar._url(), hier
+        # als PNG statt als vom Menü geöffnete Datei — Swift zeigt sie direkt
+        # in einem eigenen Fenster an, ohne Preview.app aufzurufen.
+        variant = request.args.get("variant", "lan")
+        ip = tailscale_ip() if variant == "ts" else lan_ip()
+        if not ip:
+            return jsonify(error="Keine Adresse verfügbar"), 404
+
+        import io
+
+        import qrcode
+
+        port = cfg().get("server_port", 8790)
+        token = config.load_or_create_token()
+        url = f"https://{ip}:{port}/#k={token}"
+        img = qrcode.make(url)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return Response(buf.getvalue(), mimetype="image/png")
 
     @app.get("/api/config")
     def get_config():

@@ -201,6 +201,30 @@ def test_update_check_survives_network_error(client, monkeypatch):
     assert r.get_json() == {"available": False}
 
 
+def test_qr_lan_returns_png(client, monkeypatch):
+    c, ctrl = client
+    monkeypatch.setattr(server_mod, "lan_ip", lambda: "192.168.1.50")
+    r = c.get("/api/qr")
+    assert r.status_code == 200
+    assert r.content_type == "image/png"
+    assert r.data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_qr_tailscale_returns_png(client, monkeypatch):
+    c, ctrl = client
+    monkeypatch.setattr(server_mod, "tailscale_ip", lambda: "100.64.1.2")
+    r = c.get("/api/qr?variant=ts")
+    assert r.status_code == 200
+    assert r.content_type == "image/png"
+
+
+def test_qr_tailscale_404_when_unavailable(client, monkeypatch):
+    c, ctrl = client
+    monkeypatch.setattr(server_mod, "tailscale_ip", lambda: None)
+    r = c.get("/api/qr?variant=ts")
+    assert r.status_code == 404
+
+
 def test_api_insert_calls_inserter(client, monkeypatch):
     c, ctrl = client
     calls = []

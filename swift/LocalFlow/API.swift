@@ -78,6 +78,29 @@ final class LocalFlowAPI: NSObject, URLSessionDelegate {
         task.resume()
     }
 
+    /// GET /api/qr?variant=lan|ts — liefert die Kopplungs-URL fürs Handy als
+    /// PNG (server.py generiert sie mit demselben qrcode-Paket wie
+    /// menubar._render_qr(), hier ohne Umweg über eine Datei + Preview.app).
+    func fetchQR(variant: String, completion: @escaping (Data?) -> Void) {
+        var components = URLComponents(url: baseURL.appendingPathComponent("api/qr"),
+                                        resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "variant", value: variant)]
+        var request = URLRequest(url: components.url!)
+        if let token = LocalFlowToken.current {
+            request.setValue(token, forHTTPHeaderField: "X-LocalFlow-Key")
+        }
+        let task = session.dataTask(with: request) { data, response, error in
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data = data
+            else {
+                completion(nil)
+                return
+            }
+            completion(data)
+        }
+        task.resume()
+    }
+
     /// Fire-and-forget beim Tastendruck: bittet die Engine, ausgekühlte
     /// GPU-Kernel im Hintergrund vorzuwärmen, während der Nutzer spricht — so
     /// zahlt die folgende Transkription nicht den Kalt-Aufschlag. Antwort egal.

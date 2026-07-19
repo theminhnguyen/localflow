@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engineState: EngineProcess.State = .starting
     private var updateAvailable: (tag: String, url: String)?
     private var updateTimer: Timer?
+    private var qrWindowController: QRWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // kein Dock-Icon (Menüleisten-App)
@@ -183,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let autoItem = menu.addItem(withTitle: "🚀 Beim Anmelden starten",
                                      action: #selector(toggleAutostart), target: self)
         autoItem.state = Autostart.enabled ? .on : .off
+        menu.addItem(withTitle: "📱 Handy koppeln", submenu: pairingSubmenu())
         let copyItem = menu.addItem(withTitle: "📋 Letzten Text kopieren",
                                      action: #selector(copyLastText), target: self)
         copyItem.isEnabled = flow.lastText != nil
@@ -219,6 +221,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         render()
     }
 
+    /// Untermenü mit beiden QR-Varianten (server.py: variant=lan|ts) — analog
+    /// zu menubar._build_menu()s "📱 Handy koppeln". Die Tailscale-Option wird,
+    /// anders als im Python-Menü, IMMER angezeigt (das Menü hier wird ohne
+    /// Live-Status synchron aufgebaut); ist Tailscale nicht aktiv, meldet das
+    /// der Endpunkt per 404 und ein Alert erklärt das statt eines leeren Bilds.
+    private func pairingSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.addItem(withTitle: "QR-Code anzeigen (Heim-WLAN)",
+                        action: #selector(showQRLan), target: self)
+        submenu.addItem(withTitle: "QR-Code anzeigen (unterwegs/Tailscale)",
+                        action: #selector(showQRTailscale), target: self)
+        return submenu
+    }
+
+    @objc private func showQRLan() {
+        showQR(variant: "lan", title: "LocalFlow — Handy koppeln (Heim-WLAN)")
+    }
+
+    @objc private func showQRTailscale() {
+        showQR(variant: "ts", title: "LocalFlow — Handy koppeln (unterwegs)")
+    }
+
+    private func showQR(variant: String, title: String) {
+        LocalFlowAPI.shared.fetchQR(variant: variant) { [weak self] data in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let data = data, let image = NSImage(data: data) else {
+                    let alert = NSAlert()
+                    alert.messageText = variant == "ts"
+                        ? "Tailscale ist nicht aktiv."
+                        : "QR-Code konnte nicht geladen werden."
+                    alert.runModal()
+                    return
+                }
+                self.qrWindowController = QRWindowController(image: image, title: title)
+                self.qrWindowController?.showWindow(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                self.qrWindowController?.window?.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
     @objc private func copyLastText() {
         guard let text = flow.lastText else { return }
         let pasteboard = NSPasteboard.general
@@ -248,6 +292,14 @@ private extension NSMenu {
                  target: AnyObject) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         item.target = target
+        addItem(item)
+        return item
+    }
+
+    @discardableResult
+    func addItem(withTitle title: String, submenu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
         addItem(item)
         return item
     }
